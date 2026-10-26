@@ -4,31 +4,38 @@
  * handed its input and taking its frames and audio through shared memory
  * (libretro_shm.h, the loader's side in src/loader/libretro/libretroBridge.c).
  *
- * The loader comes from <system>/lindbergh/: the loader's AppDir, the
- * launcher, linuxloader.so and the 32-bit libraries the games need, run
- * through its AppRun as standalone runs it. Content is the game's ELF, or a
- * .lindbergh text file naming it.
+ * The loader comes from <system>/lindbergh/. On Linux that is the loader's
+ * AppDir, the launcher, linuxloader.so and the 32-bit libraries the games
+ * need, run through its AppRun as standalone runs it. On Windows it is
+ * linuxloader.exe and its ll-deps/, as in the loader's Windows release.
+ * Content is the game's ELF, or a .lindbergh text file naming it.
  */
 
 #define _GNU_SOURCE
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
-#include <linux/futex.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#ifndef PATH_MAX
+#define PATH_MAX MAX_PATH
+#endif
+#else
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
+#endif
 
 #include "libretro.h"
+#include "libretro_ipc.h"
 #include "libretro_shm.h"
 
 static retro_environment_t environ_cb;
@@ -40,7 +47,13 @@ static retro_log_printf_t log_cb;
 
 static LrShm *shm;
 static char shm_name[64];
+static LrEvent run_event, frame_event;
+#ifdef _WIN32
+static HANDLE shm_mapping;
+static HANDLE loader; /* the loader's process */
+#else
 static pid_t loader;
+#endif
 static uint32_t last_frame;
 static unsigned frame_w = 640, frame_h = 480;
 static bool test_mode;
@@ -59,17 +72,6 @@ static void lr_log(enum retro_log_level level, const char *fmt, ...)
         log_cb(level, "[Lindbergh] %s", buf);
     else
         fprintf(stderr, "[Lindbergh] %s", buf);
-}
-
-static int futex_wait(volatile uint32_t *addr, uint32_t value, int ms)
-{
-    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
-    return syscall(SYS_futex, addr, FUTEX_WAIT, value, &ts, NULL, 0);
-}
-
-static void futex_wake(volatile uint32_t *addr)
-{
-    syscall(SYS_futex, addr, FUTEX_WAKE, 0x7fffffff, NULL, NULL, 0);
 }
 
 static const char *get_option(const char *key, const char *fallback)
@@ -148,6 +150,29 @@ void retro_set_controller_port_device(unsigned port, unsigned device) { (void)po
 void retro_reset(void) {}
 
 /* A .lindbergh file holds the ELF's path, relative to the file's folder */
+/* The last folder separator of a path, or NULL; Windows has both kinds */
+static char *last_separator(char *path)
+{
+    char *slash = strrchr(path, '/');
+#ifdef _WIN32
+    char *backslash = strrchr(path, '\\');
+    if (!slash || (backslash && backslash > slash))
+        slash = backslash;
+#endif
+    return slash;
+}
+
+static bool is_absolute(const char *path)
+{
+#ifdef _WIN32
+    if (path[0] && path[1] == ':')
+        return true;
+    if (path[0] == '\\')
+        return true;
+#endif
+    return path[0] == '/';
+}
+
 static bool game_path(const char *content, char *out, size_t size)
 {
     size_t n = strlen(content);
@@ -163,13 +188,13 @@ static bool game_path(const char *content, char *out, size_t size)
         }
         fclose(f);
         line[strcspn(line, "\r\n")] = 0;
-        if (line[0] == '/')
+        if (is_absolute(line))
             snprintf(out, size, "%s", line);
         else
         {
             char dir[PATH_MAX];
             snprintf(dir, sizeof(dir), "%s", content);
-            char *slash = strrchr(dir, '/');
+            char *slash = last_separator(dir);
             if (slash)
                 *slash = 0;
             snprintf(out, size, "%s/%s", slash ? dir : ".", line);
@@ -182,6 +207,19 @@ static bool game_path(const char *content, char *out, size_t size)
 
 static void close_shm(void)
 {
+#ifdef _WIN32
+    if (shm)
+        UnmapViewOfFile(shm);
+    if (shm_mapping)
+        CloseHandle(shm_mapping);
+    if (run_event)
+        CloseHandle(run_event);
+    if (frame_event)
+        CloseHandle(frame_event);
+    shm_mapping = run_event = frame_event = NULL;
+    shm = NULL;
+    shm_name[0] = 0;
+#else
     if (shm)
     {
         munmap(shm, sizeof(LrShm));
@@ -192,90 +230,34 @@ static void close_shm(void)
         shm_unlink(shm_name);
         shm_name[0] = 0;
     }
-}
-
-static void stop_loader(void)
-{
-    if (shm)
-    {
-        shm->quit = 1;
-        shm->run_seq++;
-        futex_wake(&shm->run_seq);
-    }
-    if (loader > 0)
-    {
-        /* the game exits at its next frame; then a signal to its group */
-        for (int i = 0; i < 50; i++)
-        {
-            if (waitpid(loader, NULL, WNOHANG) == loader)
-            {
-                loader = 0;
-                break;
-            }
-            usleep(20000);
-        }
-        if (loader > 0)
-        {
-            kill(-loader, SIGTERM);
-            usleep(200000);
-            kill(-loader, SIGKILL);
-            waitpid(loader, NULL, 0);
-            loader = 0;
-        }
-    }
-    close_shm();
-}
-
-bool retro_load_game(const struct retro_game_info *game)
-{
-    if (!game || !game->path)
-        return false;
-    read_options();
-
-    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
-    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
-        return false;
-
-    const char *system = NULL;
-    environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
-    char root[PATH_MAX], apprun[PATH_MAX];
-    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
-    snprintf(apprun, sizeof(apprun), "%s/AppRun", root);
-#if defined(__aarch64__)
-    /* On ARM the loader and the game are x86 programs as everywhere: run
-     * through box64 (built with BOX32, for 32-bit x86), which comes in the
-     * same folder */
-    char box64[PATH_MAX], launcher[PATH_MAX];
-    snprintf(box64, sizeof(box64), "%s/box64", root);
-    snprintf(launcher, sizeof(launcher), "%s/usr/bin/linuxloader", root);
-    if (access(box64, X_OK) != 0 || access(launcher, R_OK) != 0)
-    {
-        lr_log(RETRO_LOG_ERROR, "box64 or the loader is not in %s\n", root);
-        struct retro_message msg = {"Lindbergh: box64 or the loader is missing from system/lindbergh", 600};
-        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
-        return false;
-    }
 #endif
-    if (access(apprun, X_OK) != 0)
+}
+
+/* The shared memory, zeroed but for its header; on Windows with the two
+ * events beside it */
+static bool create_shm(void)
+{
+#ifdef _WIN32
+    snprintf(shm_name, sizeof(shm_name), "Local\\lindbergh-libretro-%lu", GetCurrentProcessId());
+    char event_name[96];
+    snprintf(event_name, sizeof(event_name), "%s" LR_EVENT_RUN, shm_name);
+    run_event = CreateEventA(NULL, FALSE, FALSE, event_name);
+    snprintf(event_name, sizeof(event_name), "%s" LR_EVENT_FRAME, shm_name);
+    frame_event = CreateEventA(NULL, FALSE, FALSE, event_name);
+    shm_mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(LrShm), shm_name);
+    if (!run_event || !frame_event || !shm_mapping)
     {
-        lr_log(RETRO_LOG_ERROR, "the loader is not in %s/lindbergh (AppRun missing)\n", system ? system : ".");
-        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
-        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        lr_log(RETRO_LOG_ERROR, "cannot create the shared memory: error %lu\n", GetLastError());
+        close_shm();
         return false;
     }
-
-    char elf[PATH_MAX];
-    if (!game_path(game->path, elf, sizeof(elf)) || access(elf, R_OK) != 0)
+    shm = MapViewOfFile(shm_mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LrShm));
+    if (!shm)
     {
-        lr_log(RETRO_LOG_ERROR, "cannot read the game %s\n", game->path);
+        close_shm();
         return false;
     }
-    char dir[PATH_MAX];
-    snprintf(dir, sizeof(dir), "%s", elf);
-    char *slash = strrchr(dir, '/');
-    if (slash)
-        *slash = 0;
-
+#else
     snprintf(shm_name, sizeof(shm_name), "/lindbergh-libretro-%d", (int)getpid());
     int fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0 || ftruncate(fd, sizeof(LrShm)) != 0)
@@ -294,9 +276,179 @@ bool retro_load_game(const struct retro_game_info *game)
         close_shm();
         return false;
     }
+#endif
     memset(shm, 0, sizeof(LrShm) - sizeof(shm->pixels));
     shm->magic = LR_SHM_MAGIC;
     shm->version = LR_SHM_VERSION;
+    return true;
+}
+
+/* Whether the loader is gone (and then forgotten) */
+static bool loader_exited(void)
+{
+#ifdef _WIN32
+    if (loader && WaitForSingleObject(loader, 0) == WAIT_OBJECT_0)
+    {
+        CloseHandle(loader);
+        loader = NULL;
+        return true;
+    }
+#else
+    if (loader > 0 && waitpid(loader, NULL, WNOHANG) == loader)
+    {
+        loader = 0;
+        return true;
+    }
+#endif
+    return false;
+}
+
+static void stop_loader(void)
+{
+    if (shm)
+    {
+        shm->quit = 1;
+        shm->run_seq++;
+        lrWake(run_event, &shm->run_seq);
+    }
+#ifdef _WIN32
+    if (loader)
+    {
+        /* the game exits at its next frame; else it is ended */
+        if (WaitForSingleObject(loader, 1000) != WAIT_OBJECT_0)
+        {
+            TerminateProcess(loader, 1);
+            WaitForSingleObject(loader, 1000);
+        }
+        CloseHandle(loader);
+        loader = NULL;
+    }
+#else
+    if (loader > 0)
+    {
+        /* the game exits at its next frame; then a signal to its group */
+        for (int i = 0; i < 50 && !loader_exited(); i++)
+            usleep(20000);
+        if (loader > 0)
+        {
+            kill(-loader, SIGTERM);
+            usleep(200000);
+            kill(-loader, SIGKILL);
+            waitpid(loader, NULL, 0);
+            loader = 0;
+        }
+    }
+#endif
+    close_shm();
+}
+
+bool retro_load_game(const struct retro_game_info *game)
+{
+    if (!game || !game->path)
+        return false;
+    read_options();
+
+    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
+    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
+        return false;
+
+    const char *system = NULL;
+    environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
+    char root[PATH_MAX];
+    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
+
+    char elf[PATH_MAX];
+    if (!game_path(game->path, elf, sizeof(elf)) || access(elf, R_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot read the game %s\n", game->path);
+        return false;
+    }
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", elf);
+    char *slash = last_separator(dir);
+    if (slash)
+        *slash = 0;
+
+#ifdef _WIN32
+    char exe[PATH_MAX];
+    snprintf(exe, sizeof(exe), "%s\\linuxloader.exe", root);
+    if (GetFileAttributesA(exe) == INVALID_FILE_ATTRIBUTES)
+    {
+        lr_log(RETRO_LOG_ERROR, "the loader is not in %s (linuxloader.exe missing)\n", root);
+        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+    if (!create_shm())
+        return false;
+    last_frame = 0;
+
+    /* The loader's console output goes to system/lindbergh/loader.log */
+    char log_path[PATH_MAX];
+    snprintf(log_path, sizeof(log_path), "%s\\loader.log", root);
+    SECURITY_ATTRIBUTES inherit = {sizeof(inherit), NULL, TRUE};
+    HANDLE log_file = CreateFileA(log_path, GENERIC_WRITE, FILE_SHARE_READ, &inherit, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL, NULL);
+
+    char cmdline[PATH_MAX * 2 + 16];
+    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\"%s", exe, elf, test_mode ? " -t" : "");
+    STARTUPINFOA si = {sizeof(si)};
+    PROCESS_INFORMATION pi = {0};
+    if (log_file != INVALID_HANDLE_VALUE)
+    {
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        si.hStdOutput = si.hStdError = log_file;
+    }
+    /* the loader inherits these from the frontend's environment, which
+     * gets them back right after */
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", shm_name);
+    /* the mix goes to the core (libretroBridge.c), not to a sound card */
+    SetEnvironmentVariableA("SDL_AUDIO_DRIVER", "dummy");
+    BOOL started = CreateProcessA(exe, cmdline, NULL, NULL, log_file != INVALID_HANDLE_VALUE,
+                                  CREATE_NO_WINDOW, NULL, dir, &si, &pi);
+    DWORD error = GetLastError();
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", NULL);
+    SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
+    if (log_file != INVALID_HANDLE_VALUE)
+        CloseHandle(log_file);
+    if (!started)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot start the loader: error %lu\n", error);
+        close_shm();
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    loader = pi.hProcess;
+    lr_log(RETRO_LOG_INFO, "started %s (pid %lu), its output in %s\n", cmdline, pi.dwProcessId, log_path);
+    return true;
+#else
+    char apprun[PATH_MAX];
+    snprintf(apprun, sizeof(apprun), "%s/AppRun", root);
+#if defined(__aarch64__)
+    /* On ARM the loader and the game are x86 programs as everywhere: run
+     * through box64 (built with BOX32, for 32-bit x86), which comes in the
+     * same folder */
+    char box64[PATH_MAX], launcher[PATH_MAX];
+    snprintf(box64, sizeof(box64), "%s/box64", root);
+    snprintf(launcher, sizeof(launcher), "%s/usr/bin/linuxloader", root);
+    if (access(box64, X_OK) != 0 || access(launcher, R_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "box64 or the loader is not in %s\n", root);
+        struct retro_message msg = {"Lindbergh: box64 or the loader is missing from system/lindbergh", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+#endif
+    if (access(apprun, X_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "the loader is not in %s (AppRun missing)\n", root);
+        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+    if (!create_shm())
+        return false;
     last_frame = 0;
 
     loader = fork();
@@ -337,6 +489,7 @@ bool retro_load_game(const struct retro_game_info *game)
     }
     lr_log(RETRO_LOG_INFO, "started %s %s (pid %d)\n", apprun, elf, (int)loader);
     return true;
+#endif
 }
 
 bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t num)
@@ -461,16 +614,15 @@ void retro_run(void)
     }
     write_input();
     shm->run_seq++;
-    futex_wake(&shm->run_seq);
+    lrWake(run_event, &shm->run_seq);
 
     /* the game's next frame, or the last one again while it loads */
     for (int waited = 0; shm->frame_seq == last_frame && waited < 100; waited += 10)
-        futex_wait(&shm->frame_seq, last_frame, 10);
+        lrWait(frame_event, &shm->frame_seq, last_frame, 10);
 
-    if (loader > 0 && waitpid(loader, NULL, WNOHANG) == loader)
+    if (loader_exited())
     {
         lr_log(RETRO_LOG_ERROR, "the game exited\n");
-        loader = 0;
         environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
     }
 

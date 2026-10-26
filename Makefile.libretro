@@ -1,15 +1,24 @@
 # The libretro core (64-bit, for the frontend); the loader it runs is the
-# 32-bit build of the main Makefile
+# 32-bit build of the main Makefile. platform=win64 builds the Windows DLL
+# with the mingw-w64 cross compiler.
 CC ?= gcc
 CFLAGS ?= -O2
 CFLAGS += -fPIC -Wall -Wextra -Wno-unused-parameter -std=gnu11
-LDFLAGS += -shared -Wl,--no-undefined -Wl,--version-script=src/libretro/link.T
 
+ifeq ($(platform),win64)
+CC = x86_64-w64-mingw32-gcc
+TARGET = build/lindbergh_libretro.dll
+LDFLAGS += -shared -static-libgcc -Wl,--no-undefined
+LIBS =
+else
 TARGET = build/lindbergh_libretro.so
+LDFLAGS += -shared -Wl,--no-undefined -Wl,--version-script=src/libretro/link.T
+LIBS = -lrt
+endif
 
-$(TARGET): src/libretro/lindbergh_libretro.c src/libretro/libretro_shm.h
+$(TARGET): src/libretro/lindbergh_libretro.c src/libretro/libretro_shm.h src/libretro/libretro_ipc.h
 	mkdir -p build
-	$(CC) $(CFLAGS) src/libretro/lindbergh_libretro.c -o $@ $(LDFLAGS) -lrt
+	$(CC) $(CFLAGS) src/libretro/lindbergh_libretro.c -o $@ $(LDFLAGS) $(LIBS)
 
 clean:
 	rm -f $(TARGET)

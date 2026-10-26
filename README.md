@@ -4,7 +4,8 @@ This fork adds a libretro core: `lindbergh_libretro.so` runs a Lindbergh game in
 
 - The core goes in RetroArch's `cores/`, the loader's AppDir (`system/lindbergh/` of the release archive) in RetroArch's `system/lindbergh/`.
 - Content is the game's ELF (in `disk0/elf/`), or a `.lindbergh` text file holding its path. The game's `linuxloader.ini` and `controls.ini` work as they do standalone (`linuxloader --create config` writes a default one).
-- Linux x86-64, and Linux aarch64 through box64 (built with BOX32, in `system/lindbergh/`), which runs the 32-bit x86 loader and game. Windows is not done yet.
+- Linux x86-64, and Linux aarch64 through box64 (built with BOX32, in `system/lindbergh/`), which runs the 32-bit x86 loader and game.
+- Windows x86-64: `system/lindbergh/` holds the loader's Windows build (`linuxloader.exe` and `ll-deps/`), which loads the game's ELF itself; its console output goes to `system/lindbergh/loader.log`.
 - Built by `.github/workflows/libretro.yml` (branch `libretro`).
 
 <p align="center">

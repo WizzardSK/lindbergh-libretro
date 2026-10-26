@@ -6,19 +6,27 @@
  * core's pads drive virtual SDL gamepads and its pointer and keys become
  * SDL events, so the controls mapping works as it does standalone; and the
  * audio mix goes into the shared ring instead of to a sound card.
+ *
+ * On Linux the game is a 32-bit process with linuxloader.so preloaded; on
+ * Windows it is linuxloader.exe, which loads the game's ELF itself. Only
+ * the shared memory, the waits (libretro_ipc.h) and the way to the audio
+ * mix differ.
  */
 
-#include <dlfcn.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <linux/futex.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <time.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#include "MinHook.h"
+#else
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#endif
 
 #ifndef __i386__
 #define __i386__
@@ -27,6 +35,7 @@
 #include <glad/gl.h>
 #include <SDL3/SDL.h>
 
+#include "../../libretro/libretro_ipc.h"
 #include "../../libretro/libretro_shm.h"
 #include "libretroBridge.h"
 #include "../log/log.h"
@@ -39,6 +48,7 @@ extern int blitHeight;
 extern int gameIsOutrunChihiroMode;
 
 static LrShm *shm;
+static LrEvent runEvent, frameEvent;
 static bool checked;
 static uint32_t lastRun;
 static SDL_Joystick *pads[LR_PLAYERS];
@@ -47,16 +57,39 @@ static uint32_t lastPointerButtons;
 static uint32_t lastPointerX = UINT32_MAX, lastPointerY = UINT32_MAX;
 static uint32_t *rowBuffer;
 
-static int futexWait(volatile uint32_t *addr, uint32_t value, int ms)
+static void *mapShm(const char *name)
 {
-    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
-    return syscall(SYS_futex, addr, FUTEX_WAIT, value, ms >= 0 ? &ts : NULL, NULL, 0);
+#ifdef _WIN32
+    char eventName[256];
+    snprintf(eventName, sizeof(eventName), "%s" LR_EVENT_RUN, name);
+    runEvent = OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, eventName);
+    snprintf(eventName, sizeof(eventName), "%s" LR_EVENT_FRAME, name);
+    frameEvent = OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, eventName);
+    HANDLE mapping = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name);
+    if (!runEvent || !frameEvent || !mapping)
+    {
+        log_error("libretro: cannot open the shared memory %s: error %lu\n", name, GetLastError());
+        return NULL;
+    }
+    void *p = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(LrShm));
+    CloseHandle(mapping);
+    return p;
+#else
+    int fd = shm_open(name, O_RDWR, 0);
+    if (fd < 0)
+    {
+        log_error("libretro: cannot open the shared memory %s: %s\n", name, strerror(errno));
+        return NULL;
+    }
+    void *p = mmap(NULL, sizeof(LrShm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    return p == MAP_FAILED ? NULL : p;
+#endif
 }
 
-static void futexWake(volatile uint32_t *addr)
-{
-    syscall(SYS_futex, addr, FUTEX_WAKE, 0x7fffffff, NULL, NULL, 0);
-}
+#ifdef _WIN32
+static void hookAudio();
+#endif
 
 bool libretroMode()
 {
@@ -66,21 +99,21 @@ bool libretroMode()
     const char *name = getenv("LINDBERGH_LIBRETRO_SHM");
     if (!name || !*name)
         return false;
-    int fd = shm_open(name, O_RDWR, 0);
-    if (fd < 0)
-    {
-        log_error("libretro: cannot open the shared memory %s: %s\n", name, strerror(errno));
+    void *p = mapShm(name);
+    if (!p)
         return false;
-    }
-    void *p = mmap(NULL, sizeof(LrShm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    close(fd);
-    if (p == MAP_FAILED || ((LrShm *)p)->magic != LR_SHM_MAGIC || ((LrShm *)p)->version != LR_SHM_VERSION)
+    if (((LrShm *)p)->magic != LR_SHM_MAGIC || ((LrShm *)p)->version != LR_SHM_VERSION)
     {
         log_error("libretro: the shared memory %s is not the core's (another build?)\n", name);
         return false;
     }
     shm = p;
+#ifdef _WIN32
+    shm->loader_pid = GetCurrentProcessId();
+    hookAudio();
+#else
     shm->loader_pid = getpid();
+#endif
     lastRun = shm->run_seq;
     log_info("libretro: running for the libretro core\n");
     return true;
@@ -234,13 +267,13 @@ void libretroFrame()
         return;
     copyFrame();
     shm->frame_seq++;
-    futexWake(&shm->frame_seq);
+    lrWake(frameEvent, &shm->frame_seq);
     /* the core's next run; it may sit in RetroArch's menu for a while */
     while (shm->run_seq == lastRun)
     {
         if (shm->quit)
             _exit(0);
-        futexWait(&shm->run_seq, lastRun, 200);
+        lrWait(runEvent, &shm->run_seq, lastRun, 200);
     }
     lastRun = shm->run_seq;
     if (shm->quit)
@@ -279,8 +312,37 @@ static void SDLCALL postmix(void *userdata, const SDL_AudioSpec *spec, float *bu
     shm->audio_write = write;
 }
 
+static void attachPostmix(SDL_AudioStream *stream)
+{
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    if (!SDL_SetAudioPostmixCallback(dev, postmix, NULL))
+        log_error("libretro: no post-mix callback: %s\n", SDL_GetError());
+}
+
 /* FAudio (libsegaapi) opens its stream here: the device it plays to gets
  * the post-mix hook that copies the mix to the core */
+#ifdef _WIN32
+/* SDL and FAudio are linked into linuxloader.exe: the function is hooked
+ * (MinHook, enabled with the loader's own hooks in init.c) */
+static SDL_AudioStream *(*realOpenAudioDeviceStream)(SDL_AudioDeviceID, const SDL_AudioSpec *,
+                                                     SDL_AudioStreamCallback, void *);
+
+static SDL_AudioStream *SDLCALL hookedOpenAudioDeviceStream(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec,
+                                                            SDL_AudioStreamCallback callback, void *userdata)
+{
+    SDL_AudioStream *stream = realOpenAudioDeviceStream(devid, spec, callback, userdata);
+    if (stream)
+        attachPostmix(stream);
+    return stream;
+}
+
+static void hookAudio()
+{
+    if (MH_CreateHook((void *)SDL_OpenAudioDeviceStream, (void *)hookedOpenAudioDeviceStream,
+                      (void **)&realOpenAudioDeviceStream) != MH_OK)
+        log_error("libretro: cannot hook SDL_OpenAudioDeviceStream, no audio\n");
+}
+#else
 SDL_AudioStream *SDL_OpenAudioDeviceStream(SDL_AudioDeviceID devid, const SDL_AudioSpec *spec,
                                            SDL_AudioStreamCallback callback, void *userdata)
 {
@@ -288,10 +350,7 @@ SDL_AudioStream *SDL_OpenAudioDeviceStream(SDL_AudioDeviceID devid, const SDL_Au
         dlsym(RTLD_NEXT, "SDL_OpenAudioDeviceStream");
     SDL_AudioStream *stream = real(devid, spec, callback, userdata);
     if (stream && libretroMode())
-    {
-        SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
-        if (!SDL_SetAudioPostmixCallback(dev, postmix, NULL))
-            log_error("libretro: no post-mix callback: %s\n", SDL_GetError());
-    }
+        attachPostmix(stream);
     return stream;
 }
+#endif

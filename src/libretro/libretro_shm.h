@@ -1,12 +1,13 @@
 /*
  * The memory the libretro core (lindbergh_libretro.so, a process of the
  * frontend) and the loader running the game (linuxloader.so, preloaded into
- * the 32-bit game) share. Its name is in LINDBERGH_LIBRETRO_SHM; the core
- * creates it with shm_open and the loader maps it.
+ * the 32-bit game; linuxloader.exe on Windows) share. Its name is in
+ * LINDBERGH_LIBRETRO_SHM; the core creates it (shm_open, or a named file
+ * mapping on Windows) and the loader maps it.
  *
  * Fixed-width fields only, the same layout for the 64-bit core and the
- * 32-bit loader. The two take turns on a frame with futexes on 32-bit
- * words (sem_t differs between the two ABIs):
+ * 32-bit loader. The two take turns on a frame with run_seq and frame_seq
+ * (futexes, or events on Windows: libretro_ipc.h):
  *
  *   core: input written, run_seq++ and woken     loader: waits for run_seq
  *   loader: at the game's buffer swap, the frame copied in, frame_seq++ and

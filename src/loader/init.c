@@ -17,6 +17,7 @@
 #include "config/config.h"
 #include "../minhook/include/MinHook.h"
 #include "log/log.h"
+#include "libretro/libretroBridge.h"
 
 #if defined(__linux__)
 #include "input/evdevInput.h"
@@ -69,6 +70,9 @@ void initMain(char *configPath, char *controlsPath)
         log_error("Failed to initialize MinHook");
         exit(1);
     }
+
+    // The libretro core's shared memory, and on Windows its audio hook
+    libretroMode();
 
     if (initPatch() != 0)
         exit(1);

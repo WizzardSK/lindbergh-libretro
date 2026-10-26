@@ -61,6 +61,37 @@ jobs:
           name: lindbergh_libretro-linux-x86_64
           path: lindbergh_libretro-linux-x86_64.tar.gz
 
+  # The loader's Windows build (linuxloader.exe, which loads the game's ELF
+  # itself), as the project's own Windows release makes it, and the 64-bit
+  # core cross-compiled beside it
+  windows-x86_64:
+    name: Windows x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: scripts/windows/install-packages.sh
+      - name: Loader
+        shell: bash
+        run: scripts/windows/windows-build.sh
+      - name: Core
+        run: make -f Makefile.libretro platform=win64
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/cores dist/info dist/system/lindbergh
+          cp build/lindbergh_libretro.dll dist/cores/
+          x86_64-w64-mingw32-strip dist/cores/lindbergh_libretro.dll
+          cp lindbergh_libretro.info dist/info/
+          cp -a win-release/. dist/system/lindbergh/
+          git rev-parse --short HEAD > dist/system/lindbergh/build
+          (cd dist && zip -r ../lindbergh_libretro-windows-x86_64.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lindbergh_libretro-windows-x86_64
+          path: lindbergh_libretro-windows-x86_64.zip
+
   # box64 with BOX32, which runs 32-bit x86 programs on 64-bit ARM: the
   # loader and the game on aarch64
   box64:
