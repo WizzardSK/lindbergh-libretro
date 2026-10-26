@@ -232,10 +232,7 @@ void startSDL()
     // For the libretro core the window stays hidden: the frames go to the
     // core (libretroBridge.c), which the frontend paces
     if (libretroMode())
-    {
         SDL_GL_SetSwapInterval(0);
-        libretroAttachPads();
-    }
     else
         SDL_ShowWindow(g_SdlWindow);
 

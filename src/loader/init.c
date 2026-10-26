@@ -129,6 +129,9 @@ void initMain(char *configPath, char *controlsPath)
     }
     log_info("Card reader initialized");
 
+    // The libretro core's pads, before the input looks for controllers
+    libretroAttachPads();
+
     if (initSdlInput(controlsPath) != 0)
         exit(1);
     log_info("SDL input initialized");

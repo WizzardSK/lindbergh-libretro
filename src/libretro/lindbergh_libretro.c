@@ -342,6 +342,55 @@ static void stop_loader(void)
     close_shm();
 }
 
+/* The SDL_Scancode of a RetroArch key, for the keys the loader's controls
+ * use (its defaults: 5 and 6 coins, 1 and 2 start, T test, S service, the
+ * arrows); 0 for the rest. Escape is RetroArch's own. */
+static uint32_t sdl_scancode(unsigned key)
+{
+    if (key >= RETROK_a && key <= RETROK_z)
+        return 4 + (key - RETROK_a);
+    if (key >= RETROK_1 && key <= RETROK_9)
+        return 30 + (key - RETROK_1);
+    if (key >= RETROK_F1 && key <= RETROK_F12)
+        return 58 + (key - RETROK_F1);
+    switch (key)
+    {
+    case RETROK_0: return 39;
+    case RETROK_RETURN: return 40;
+    case RETROK_BACKSPACE: return 42;
+    case RETROK_TAB: return 43;
+    case RETROK_SPACE: return 44;
+    case RETROK_MINUS: return 45;
+    case RETROK_EQUALS: return 46;
+    case RETROK_RIGHT: return 79;
+    case RETROK_LEFT: return 80;
+    case RETROK_DOWN: return 81;
+    case RETROK_UP: return 82;
+    case RETROK_LCTRL: return 224;
+    case RETROK_LSHIFT: return 225;
+    case RETROK_LALT: return 226;
+    case RETROK_RCTRL: return 228;
+    case RETROK_RSHIFT: return 229;
+    case RETROK_RALT: return 230;
+    default: return 0;
+    }
+}
+
+/* RetroArch's keyboard into the loader's key queue, which it turns into
+ * SDL key events (libretroBridge.c) */
+static void keyboard_event(bool down, unsigned keycode, uint32_t character, uint16_t key_modifiers)
+{
+    (void)character; (void)key_modifiers;
+    uint32_t scancode = sdl_scancode(keycode);
+    if (!shm || !scancode)
+        return;
+    uint32_t head = shm->key_head;
+    if (head - shm->key_tail >= LR_KEY_QUEUE)
+        return;
+    shm->keys[head % LR_KEY_QUEUE] = (LrKey){scancode, down};
+    __atomic_store_n(&shm->key_head, head + 1, __ATOMIC_RELEASE);
+}
+
 bool retro_load_game(const struct retro_game_info *game)
 {
     if (!game || !game->path)
@@ -351,6 +400,8 @@ bool retro_load_game(const struct retro_game_info *game)
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
     if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
         return false;
+    struct retro_keyboard_callback keyboard = {keyboard_event};
+    environ_cb(RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, &keyboard);
 
     const char *system = NULL;
     environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);

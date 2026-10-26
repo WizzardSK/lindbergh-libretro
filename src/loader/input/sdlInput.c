@@ -27,6 +27,12 @@
 #include "../mainShared.h"
 #include "../graphics/overlayMsgs.h"
 #include "wiimoteEvdev.h"
+#ifdef COMPILING_LINUXLOADER_ELF
+// The launcher executable runs no game: never for the libretro core
+#define libretroMode() false
+#else
+#include "../libretro/libretroBridge.h"
+#endif
 
 // --- GLOBAL STATE AND MAPPINGS ---
 ActionState gActionStates[MAX_ENTITIES][NUM_LOGICAL_ACTIONS];
@@ -855,6 +861,18 @@ void addBinding(ControlBinding binding)
  * @brief Applies the default control mappings if controls.ini is not found.
  * Iterates through the default binding arrays and adds them to the system.
  */
+// For the libretro core, in place of the common bindings' gamepad part:
+// a coin on Select (the gamepad has none by default), Service and Test on
+// L3 and R3, and no Start+Select exit, as RetroArch closes the game itself
+static const ControlBinding gLibretroPadBindings[] = {
+    {INPUT_TYPE_GAMEPAD_BUTTON, 0, SDL_GAMEPAD_BUTTON_START, AXIS_MODE_DIGITAL, 0, false, PLAYER_1, LA_Start, -1, 0},
+    {INPUT_TYPE_GAMEPAD_BUTTON, 0, SDL_GAMEPAD_BUTTON_BACK, AXIS_MODE_DIGITAL, 0, false, PLAYER_1, LA_Coin, -1, 0},
+    {INPUT_TYPE_GAMEPAD_BUTTON, 1, SDL_GAMEPAD_BUTTON_START, AXIS_MODE_DIGITAL, 0, false, PLAYER_2, LA_Start, -1, 0},
+    {INPUT_TYPE_GAMEPAD_BUTTON, 1, SDL_GAMEPAD_BUTTON_BACK, AXIS_MODE_DIGITAL, 0, false, PLAYER_2, LA_Coin, -1, 0},
+    {INPUT_TYPE_GAMEPAD_BUTTON, 0, SDL_GAMEPAD_BUTTON_LEFT_STICK, AXIS_MODE_DIGITAL, 0, false, PLAYER_1, LA_Service, -1, 0},
+    {INPUT_TYPE_GAMEPAD_BUTTON, 0, SDL_GAMEPAD_BUTTON_RIGHT_STICK, AXIS_MODE_DIGITAL, 0, false, SYSTEM, LA_Test, -1, 0},
+};
+
 void setDefaultMappings()
 {
     log_warn("Applying default mappings...\n");
@@ -862,7 +880,14 @@ void setDefaultMappings()
     // Add common bindings
     for (size_t i = 0; i < gDefaultCommonBindingsSize; i++)
     {
+        if (libretroMode() && gDefaultCommonBindings[i].type == INPUT_TYPE_GAMEPAD_BUTTON)
+            continue;
         addBinding(gDefaultCommonBindings[i]);
+    }
+    if (libretroMode())
+    {
+        for (size_t i = 0; i < sizeof(gLibretroPadBindings) / sizeof(gLibretroPadBindings[0]); i++)
+            addBinding(gLibretroPadBindings[i]);
     }
 
     // Add game-specific bindings

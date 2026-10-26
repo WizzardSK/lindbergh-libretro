@@ -7,7 +7,8 @@
  * first asked in init.c, after MinHook is set up and before its hooks are
  * enabled, as the Windows build hooks SDL's audio then */
 bool libretroMode();
-/* Virtual SDL gamepads for the core's pads; after SDL is initialized */
+/* Virtual SDL gamepads for the core's pads; after SDL is initialized and
+ * before initSdlInput, which opens the controllers it finds then */
 void libretroAttachPads();
 /* The core's input as SDL gamepad, mouse and key state; in pollEvents */
 void libretroPollInput();

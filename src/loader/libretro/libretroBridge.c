@@ -219,7 +219,7 @@ void libretroPollInput()
         lastPointerButtons = shm->pointer_buttons;
     }
 
-    while (shm->key_tail != shm->key_head)
+    while (shm->key_tail != __atomic_load_n(&shm->key_head, __ATOMIC_ACQUIRE))
     {
         LrKey k = shm->keys[shm->key_tail % LR_KEY_QUEUE];
         SDL_Event ev;

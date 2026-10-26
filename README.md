@@ -3,6 +3,7 @@
 This fork adds a libretro core: `lindbergh_libretro.so` runs a Lindbergh game in RetroArch. The games are 32-bit Linux programs, so the core runs the game with the loader as a process of its own and exchanges the frames, audio and input with it through shared memory (`src/libretro/`, the loader's side in `src/loader/libretro/libretroBridge.c`): the game draws one frame per RetroArch frame, its window stays hidden, RetroArch's pads become SDL gamepads (so `controls.ini` works as standalone) and its light gun or mouse the pointer.
 
 - The core goes in RetroArch's `cores/`, the loader's AppDir (`system/lindbergh/` of the release archive) in RetroArch's `system/lindbergh/`.
+- Controls without a `controls.ini`: the loader's defaults, with RetroArch's keyboard as the keyboard (5 and 6 coin, 1 and 2 start, T test, S service, the arrows) and on the pads Start, Select as coin, L3 service and R3 test.
 - Content is the game's ELF (in `disk0/elf/`), or a `.lindbergh` text file holding its path. The game's `linuxloader.ini` and `controls.ini` work as they do standalone (`linuxloader --create config` writes a default one).
 - Linux x86-64, and Linux aarch64 through box64 (built with BOX32, in `system/lindbergh/`), which runs the 32-bit x86 loader and game.
 - Windows x86-64: `system/lindbergh/` holds the loader's Windows build (`linuxloader.exe` and `ll-deps/`), which loads the game's ELF itself; its console output goes to `system/lindbergh/loader.log`.
