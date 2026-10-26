@@ -623,8 +623,20 @@ static void write_input(void)
     shm->pointer_valid = 1;
 }
 
+/* The ring keeps about this much in hand: SDL's device in the loader mixes
+ * in blocks at its own pace (libretroBridge.c), so a frame's worth is not
+ * always there at a run's end */
+#define AUDIO_CUSHION_FRAMES 2048
+
+/* Exactly one frame's worth of audio a run, at the rate SDL mixes at: out
+ * of the ring once it holds the cushion, silence while it fills (again).
+ * Handing over what happened to be there gave RetroArch nothing on one run
+ * and two blocks on the next: underruns, scratchy sound (NNshi). */
 static void send_audio(void)
 {
+    static double owed;
+    static bool primed;
+
     /* the rate SDL's device mixes at, once the loader has seen it */
     if (shm->audio_rate && shm->audio_rate != (uint32_t)sample_rate)
     {
@@ -634,22 +646,34 @@ static void send_audio(void)
         environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av);
         lr_log(RETRO_LOG_INFO, "audio at %u Hz\n", shm->audio_rate);
     }
+    owed += sample_rate / 60.0;
+    uint32_t frames = (uint32_t)owed;
+    owed -= frames;
+
     uint32_t write = shm->audio_write, read = shm->audio_read;
     uint32_t avail = write - read;
-    if (avail > LR_AUDIO_FRAMES)
+    if (!primed && avail >= AUDIO_CUSHION_FRAMES + frames)
+        primed = true;
+    /* a backlog (the frontend held back, or its clock runs slow) is cut
+     * back to the cushion rather than played late */
+    if (avail > 3 * AUDIO_CUSHION_FRAMES)
     {
-        read = write - LR_AUDIO_FRAMES;
-        avail = LR_AUDIO_FRAMES;
+        read = write - AUDIO_CUSHION_FRAMES - frames;
+        avail = AUDIO_CUSHION_FRAMES + frames;
     }
-    for (uint32_t i = 0; i < avail; i++)
+    uint32_t take = primed ? (avail < frames ? avail : frames) : 0;
+    for (uint32_t i = 0; i < take; i++)
     {
         const int16_t *in = &shm->audio[((read + i) % LR_AUDIO_FRAMES) * 2];
         audio_out[i * 2] = in[0];
         audio_out[i * 2 + 1] = in[1];
     }
-    shm->audio_read = read + avail;
-    if (avail && audio_batch_cb)
-        audio_batch_cb(audio_out, avail);
+    memset(&audio_out[take * 2], 0, (frames - take) * 2 * sizeof(int16_t));
+    if (primed && take < frames)
+        primed = false; /* ran dry: fill the cushion again */
+    shm->audio_read = read + take;
+    if (frames && audio_batch_cb)
+        audio_batch_cb(audio_out, frames);
 }
 
 void retro_run(void)

@@ -111,6 +111,8 @@ bool libretroMode()
     /* The game's window stays hidden, so it never has the focus, and SDL
      * drops joystick input then - the core's virtual pads too */
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    /* Small device blocks, so the mix reaches the core in steady steps */
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");
 #ifdef _WIN32
     shm->loader_pid = GetCurrentProcessId();
     hookAudio();
