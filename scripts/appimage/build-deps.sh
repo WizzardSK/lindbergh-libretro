@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SDL_ttf and SDL_image at releases rather than their main branches
+# (libretro fork), and the build stops at the first failure
+set -e
 
 APPIMAGEDIRNAME=linuxloader.AppDir
 OUTPUT_FOLDER=$(realpath "./$APPIMAGEDIRNAME")
@@ -11,13 +14,13 @@ git clone --branch release-3.4.8 https://github.com/libsdl-org/SDL.git
 cd SDL
 mkdir build
 cd build
-cmake ../ -DCMAKE_C_FLAGS=-m32 -DCMAKE_INSTALL_PREFIX=/usr 
+cmake ../ -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 -DCMAKE_INSTALL_PREFIX=/usr -DSDL_TESTS=OFF
 make -j4
 sudo make install
 cd ../../
 
 # Build SDL3_ttf
-git clone https://github.com/libsdl-org/SDL_ttf.git
+git clone --depth 1 --branch release-3.2.2 https://github.com/libsdl-org/SDL_ttf.git
 cd SDL_ttf
 mkdir build
 cd build
@@ -27,7 +30,7 @@ sudo make install
 cd ../../
 
 # Build SDL3_image
-git clone https://github.com/libsdl-org/SDL_image.git
+git clone --depth 1 --branch release-3.4.8 https://github.com/libsdl-org/SDL_image.git
 cd SDL_image
 mkdir build
 cd build

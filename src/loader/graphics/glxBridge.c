@@ -27,6 +27,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include "glxBridge.h"
+#include "../libretro/libretroBridge.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -451,7 +452,9 @@ void bridgeGlxSwapBuffers(Display *dpy, GLXDrawable drawable)
 
     SDL_GL_SwapWindow(getSDLWindow());
 
-    if (config->fpsLimiter)
+    if (libretroMode())
+        libretroFrame();
+    else if (config->fpsLimiter)
         frameTiming();
 
     static double localFps = 0.0;

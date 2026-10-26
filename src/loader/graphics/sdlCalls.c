@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "blitStretching.h"
+#include "../libretro/libretroBridge.h"
 #include "../config/config.h"
 #include "crossHair.h"
 #include "overlayMsgs.h"
@@ -216,7 +217,7 @@ void startSDL()
     if (gId == QUIZ_AXA_SBMS || gId == QUIZ_AXA_SBUR_LIVE)
         SDL_SetWindowPosition(g_SdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    if (getConfig()->fullscreen)
+    if (getConfig()->fullscreen && !libretroMode())
     {
         SDL_SetWindowFullscreenMode(g_SdlWindow, NULL);
         SDL_SetWindowFullscreen(g_SdlWindow, true);
@@ -228,10 +229,18 @@ void startSDL()
     if (gId != PRIMEVAL_HUNT_SBPP && gGrp != GROUP_LGJ)
         SDL_SetWindowResizable(g_SdlWindow, true);
 
-    SDL_ShowWindow(g_SdlWindow);
+    // For the libretro core the window stays hidden: the frames go to the
+    // core (libretroBridge.c), which the frontend paces
+    if (libretroMode())
+    {
+        SDL_GL_SetSwapInterval(0);
+        libretroAttachPads();
+    }
+    else
+        SDL_ShowWindow(g_SdlWindow);
 
     Uint64 startTime = SDL_GetTicks();
-    int running = 1;
+    int running = !libretroMode();
 
     // We clear the window background
     while (running)
@@ -317,6 +326,7 @@ void sdlQuit()
 
 void pollEvents()
 {
+    libretroPollInput();
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {

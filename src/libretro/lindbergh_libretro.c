@@ -1,0 +1,501 @@
+/*
+ * The libretro core: a SEGA Lindbergh game run by the loader as a process
+ * of its own (the games are 32-bit Linux programs, the frontend is not),
+ * handed its input and taking its frames and audio through shared memory
+ * (libretro_shm.h, the loader's side in src/loader/libretro/libretroBridge.c).
+ *
+ * The loader comes from <system>/lindbergh/: the loader's AppDir, the
+ * launcher, linuxloader.so and the 32-bit libraries the games need, run
+ * through its AppRun as standalone runs it. Content is the game's ELF, or a
+ * .lindbergh text file naming it.
+ */
+
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <linux/futex.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "libretro.h"
+#include "libretro_shm.h"
+
+static retro_environment_t environ_cb;
+static retro_video_refresh_t video_cb;
+static retro_audio_sample_batch_t audio_batch_cb;
+static retro_input_poll_t input_poll_cb;
+static retro_input_state_t input_state_cb;
+static retro_log_printf_t log_cb;
+
+static LrShm *shm;
+static char shm_name[64];
+static pid_t loader;
+static uint32_t last_frame;
+static unsigned frame_w = 640, frame_h = 480;
+static bool test_mode;
+static bool pointer_lightgun = true;
+static int16_t *audio_out;
+static double sample_rate = 48000.0;
+
+static void lr_log(enum retro_log_level level, const char *fmt, ...)
+{
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (log_cb)
+        log_cb(level, "[Lindbergh] %s", buf);
+    else
+        fprintf(stderr, "[Lindbergh] %s", buf);
+}
+
+static int futex_wait(volatile uint32_t *addr, uint32_t value, int ms)
+{
+    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
+    return syscall(SYS_futex, addr, FUTEX_WAIT, value, &ts, NULL, 0);
+}
+
+static void futex_wake(volatile uint32_t *addr)
+{
+    syscall(SYS_futex, addr, FUTEX_WAKE, 0x7fffffff, NULL, NULL, 0);
+}
+
+static const char *get_option(const char *key, const char *fallback)
+{
+    struct retro_variable var = {key, NULL};
+    if (environ_cb && environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+        return var.value;
+    return fallback;
+}
+
+static void read_options(void)
+{
+    test_mode = !strcmp(get_option("lindbergh_test_mode", "disabled"), "enabled");
+    pointer_lightgun = !strcmp(get_option("lindbergh_pointer", "lightgun"), "lightgun");
+}
+
+void retro_set_environment(retro_environment_t cb)
+{
+    environ_cb = cb;
+    static const struct retro_variable vars[] = {
+        {"lindbergh_test_mode", "Test Mode (Restart); disabled|enabled"},
+        {"lindbergh_pointer", "Pointer; lightgun|mouse"},
+        {NULL, NULL},
+    };
+    cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
+    bool no_game = false;
+    cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
+    struct retro_log_callback logging;
+    if (cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging))
+        log_cb = logging.log;
+}
+
+void retro_set_video_refresh(retro_video_refresh_t cb) { video_cb = cb; }
+void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
+void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { audio_batch_cb = cb; }
+void retro_set_input_poll(retro_input_poll_t cb) { input_poll_cb = cb; }
+void retro_set_input_state(retro_input_state_t cb) { input_state_cb = cb; }
+
+void retro_init(void)
+{
+    audio_out = malloc(LR_AUDIO_FRAMES * 2 * sizeof(int16_t));
+}
+
+void retro_deinit(void)
+{
+    free(audio_out);
+    audio_out = NULL;
+}
+
+unsigned retro_api_version(void) { return RETRO_API_VERSION; }
+
+void retro_get_system_info(struct retro_system_info *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->library_name = "Lindbergh";
+    info->library_version = "0.1";
+    info->valid_extensions = "elf|lindbergh";
+    info->need_fullpath = true;
+    info->block_extract = true;
+}
+
+void retro_get_system_av_info(struct retro_system_av_info *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->geometry.base_width = frame_w;
+    info->geometry.base_height = frame_h;
+    info->geometry.max_width = LR_MAX_WIDTH;
+    info->geometry.max_height = LR_MAX_HEIGHT;
+    info->geometry.aspect_ratio = (float)frame_w / (float)frame_h;
+    info->timing.fps = 60.0;
+    info->timing.sample_rate = sample_rate;
+}
+
+void retro_set_controller_port_device(unsigned port, unsigned device) { (void)port; (void)device; }
+
+void retro_reset(void) {}
+
+/* A .lindbergh file holds the ELF's path, relative to the file's folder */
+static bool game_path(const char *content, char *out, size_t size)
+{
+    size_t n = strlen(content);
+    if (n > 10 && !strcasecmp(content + n - 10, ".lindbergh"))
+    {
+        FILE *f = fopen(content, "r");
+        char line[PATH_MAX] = "";
+        if (!f || !fgets(line, sizeof(line), f))
+        {
+            if (f)
+                fclose(f);
+            return false;
+        }
+        fclose(f);
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] == '/')
+            snprintf(out, size, "%s", line);
+        else
+        {
+            char dir[PATH_MAX];
+            snprintf(dir, sizeof(dir), "%s", content);
+            char *slash = strrchr(dir, '/');
+            if (slash)
+                *slash = 0;
+            snprintf(out, size, "%s/%s", slash ? dir : ".", line);
+        }
+        return true;
+    }
+    snprintf(out, size, "%s", content);
+    return true;
+}
+
+static void close_shm(void)
+{
+    if (shm)
+    {
+        munmap(shm, sizeof(LrShm));
+        shm = NULL;
+    }
+    if (shm_name[0])
+    {
+        shm_unlink(shm_name);
+        shm_name[0] = 0;
+    }
+}
+
+static void stop_loader(void)
+{
+    if (shm)
+    {
+        shm->quit = 1;
+        shm->run_seq++;
+        futex_wake(&shm->run_seq);
+    }
+    if (loader > 0)
+    {
+        /* the game exits at its next frame; then a signal to its group */
+        for (int i = 0; i < 50; i++)
+        {
+            if (waitpid(loader, NULL, WNOHANG) == loader)
+            {
+                loader = 0;
+                break;
+            }
+            usleep(20000);
+        }
+        if (loader > 0)
+        {
+            kill(-loader, SIGTERM);
+            usleep(200000);
+            kill(-loader, SIGKILL);
+            waitpid(loader, NULL, 0);
+            loader = 0;
+        }
+    }
+    close_shm();
+}
+
+bool retro_load_game(const struct retro_game_info *game)
+{
+    if (!game || !game->path)
+        return false;
+    read_options();
+
+    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
+    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
+        return false;
+
+    const char *system = NULL;
+    environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
+    char root[PATH_MAX], apprun[PATH_MAX];
+    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
+    snprintf(apprun, sizeof(apprun), "%s/AppRun", root);
+#if defined(__aarch64__)
+    /* On ARM the loader and the game are x86 programs as everywhere: run
+     * through box64 (built with BOX32, for 32-bit x86), which comes in the
+     * same folder */
+    char box64[PATH_MAX], launcher[PATH_MAX];
+    snprintf(box64, sizeof(box64), "%s/box64", root);
+    snprintf(launcher, sizeof(launcher), "%s/usr/bin/linuxloader", root);
+    if (access(box64, X_OK) != 0 || access(launcher, R_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "box64 or the loader is not in %s\n", root);
+        struct retro_message msg = {"Lindbergh: box64 or the loader is missing from system/lindbergh", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+#endif
+    if (access(apprun, X_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "the loader is not in %s/lindbergh (AppRun missing)\n", system ? system : ".");
+        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+
+    char elf[PATH_MAX];
+    if (!game_path(game->path, elf, sizeof(elf)) || access(elf, R_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot read the game %s\n", game->path);
+        return false;
+    }
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", elf);
+    char *slash = strrchr(dir, '/');
+    if (slash)
+        *slash = 0;
+
+    snprintf(shm_name, sizeof(shm_name), "/lindbergh-libretro-%d", (int)getpid());
+    int fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (fd < 0 || ftruncate(fd, sizeof(LrShm)) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot create the shared memory: %s\n", strerror(errno));
+        if (fd >= 0)
+            close(fd);
+        close_shm();
+        return false;
+    }
+    shm = mmap(NULL, sizeof(LrShm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (shm == MAP_FAILED)
+    {
+        shm = NULL;
+        close_shm();
+        return false;
+    }
+    memset(shm, 0, sizeof(LrShm) - sizeof(shm->pixels));
+    shm->magic = LR_SHM_MAGIC;
+    shm->version = LR_SHM_VERSION;
+    last_frame = 0;
+
+    loader = fork();
+    if (loader == 0)
+    {
+        setpgid(0, 0);
+        if (chdir(dir) != 0)
+            _exit(127);
+        setenv("LINDBERGH_LIBRETRO_SHM", shm_name, 1);
+        /* the mix goes to the core (libretroBridge.c), not to a sound card */
+        setenv("SDL_AUDIO_DRIVER", "dummy", 1);
+#if defined(__aarch64__)
+        /* what AppRun sets, for the x86 libraries box64 loads */
+        char libs[PATH_MAX * 2];
+        snprintf(libs, sizeof(libs), "%s/usr/lib32:%s/usr/lib", root, root);
+        setenv("APP_IMG_ROOT", root, 1);
+        setenv("LD_LIBRARY_PATH", libs, 1);
+        setenv("BOX64_LD_LIBRARY_PATH", libs, 1);
+        setenv("BOX64_LOG", "1", 0);
+        if (test_mode)
+            execl(box64, box64, launcher, elf, "-t", (char *)NULL);
+        else
+            execl(box64, box64, launcher, elf, (char *)NULL);
+#else
+        if (test_mode)
+            execl(apprun, apprun, elf, "-t", (char *)NULL);
+        else
+            execl(apprun, apprun, elf, (char *)NULL);
+#endif
+        _exit(127);
+    }
+    if (loader < 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot start the loader: %s\n", strerror(errno));
+        loader = 0;
+        close_shm();
+        return false;
+    }
+    lr_log(RETRO_LOG_INFO, "started %s %s (pid %d)\n", apprun, elf, (int)loader);
+    return true;
+}
+
+bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t num)
+{
+    (void)type; (void)info; (void)num;
+    return false;
+}
+
+void retro_unload_game(void)
+{
+    stop_loader();
+}
+
+unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
+
+static int16_t axis(unsigned port, unsigned index, unsigned id)
+{
+    return input_state_cb(port, RETRO_DEVICE_ANALOG, index, id);
+}
+
+static int16_t trigger(unsigned port, unsigned id)
+{
+    int16_t v = input_state_cb(port, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_BUTTON, id);
+    if (v <= 0)
+        v = input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, id) ? 0x7fff : 0;
+    return v;
+}
+
+static void write_input(void)
+{
+    static const struct { unsigned retro, lr; } map[] = {
+        {RETRO_DEVICE_ID_JOYPAD_B, LR_PAD_A}, {RETRO_DEVICE_ID_JOYPAD_A, LR_PAD_B},
+        {RETRO_DEVICE_ID_JOYPAD_Y, LR_PAD_X}, {RETRO_DEVICE_ID_JOYPAD_X, LR_PAD_Y},
+        {RETRO_DEVICE_ID_JOYPAD_SELECT, LR_PAD_BACK}, {RETRO_DEVICE_ID_JOYPAD_START, LR_PAD_START},
+        {RETRO_DEVICE_ID_JOYPAD_L3, LR_PAD_LSTICK}, {RETRO_DEVICE_ID_JOYPAD_R3, LR_PAD_RSTICK},
+        {RETRO_DEVICE_ID_JOYPAD_L, LR_PAD_LSHOULDER}, {RETRO_DEVICE_ID_JOYPAD_R, LR_PAD_RSHOULDER},
+        {RETRO_DEVICE_ID_JOYPAD_UP, LR_PAD_UP}, {RETRO_DEVICE_ID_JOYPAD_DOWN, LR_PAD_DOWN},
+        {RETRO_DEVICE_ID_JOYPAD_LEFT, LR_PAD_LEFT}, {RETRO_DEVICE_ID_JOYPAD_RIGHT, LR_PAD_RIGHT},
+    };
+    input_poll_cb();
+    for (unsigned p = 0; p < LR_PLAYERS; p++)
+    {
+        uint32_t buttons = 0;
+        for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
+            if (input_state_cb(p, RETRO_DEVICE_JOYPAD, 0, map[i].retro))
+                buttons |= 1u << map[i].lr;
+        LrPad pad = {buttons, {0}};
+        pad.axes[LR_AXIS_LX] = axis(p, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+        pad.axes[LR_AXIS_LY] = axis(p, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
+        pad.axes[LR_AXIS_RX] = axis(p, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X);
+        pad.axes[LR_AXIS_RY] = axis(p, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y);
+        pad.axes[LR_AXIS_LT] = trigger(p, RETRO_DEVICE_ID_JOYPAD_L2);
+        pad.axes[LR_AXIS_RT] = trigger(p, RETRO_DEVICE_ID_JOYPAD_R2);
+        shm->pads[p] = pad;
+    }
+
+    /* the pointer over the picture: RetroArch's light gun (which follows
+     * the mouse) or its pointer, -0x7fff..0x7fff across the content */
+    int16_t x, y;
+    uint32_t b = 0;
+    if (pointer_lightgun)
+    {
+        x = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+        y = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
+        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER)) b |= 1;
+        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_RELOAD)) b |= 2;
+        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A)) b |= 4;
+    }
+    else
+    {
+        x = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
+        y = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+    }
+    if (input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT)) b |= 1;
+    if (input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT)) b |= 2;
+    if (input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_MIDDLE)) b |= 4;
+    shm->pointer_x = (uint32_t)((int32_t)x + 0x8000);
+    shm->pointer_y = (uint32_t)((int32_t)y + 0x8000);
+    shm->pointer_buttons = b;
+    shm->pointer_valid = 1;
+}
+
+static void send_audio(void)
+{
+    /* the rate SDL's device mixes at, once the loader has seen it */
+    if (shm->audio_rate && shm->audio_rate != (uint32_t)sample_rate)
+    {
+        sample_rate = shm->audio_rate;
+        struct retro_system_av_info av;
+        retro_get_system_av_info(&av);
+        environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av);
+        lr_log(RETRO_LOG_INFO, "audio at %u Hz\n", shm->audio_rate);
+    }
+    uint32_t write = shm->audio_write, read = shm->audio_read;
+    uint32_t avail = write - read;
+    if (avail > LR_AUDIO_FRAMES)
+    {
+        read = write - LR_AUDIO_FRAMES;
+        avail = LR_AUDIO_FRAMES;
+    }
+    for (uint32_t i = 0; i < avail; i++)
+    {
+        const int16_t *in = &shm->audio[((read + i) % LR_AUDIO_FRAMES) * 2];
+        audio_out[i * 2] = in[0];
+        audio_out[i * 2 + 1] = in[1];
+    }
+    shm->audio_read = read + avail;
+    if (avail && audio_batch_cb)
+        audio_batch_cb(audio_out, avail);
+}
+
+void retro_run(void)
+{
+    bool updated = false;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
+        read_options();
+
+    if (!shm)
+    {
+        video_cb(NULL, frame_w, frame_h, 0);
+        return;
+    }
+    write_input();
+    shm->run_seq++;
+    futex_wake(&shm->run_seq);
+
+    /* the game's next frame, or the last one again while it loads */
+    for (int waited = 0; shm->frame_seq == last_frame && waited < 100; waited += 10)
+        futex_wait(&shm->frame_seq, last_frame, 10);
+
+    if (loader > 0 && waitpid(loader, NULL, WNOHANG) == loader)
+    {
+        lr_log(RETRO_LOG_ERROR, "the game exited\n");
+        loader = 0;
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+    }
+
+    if (shm->frame_seq != last_frame && shm->width && shm->height)
+    {
+        last_frame = shm->frame_seq;
+        if (shm->width != frame_w || shm->height != frame_h)
+        {
+            frame_w = shm->width;
+            frame_h = shm->height;
+            struct retro_game_geometry geometry = {frame_w, frame_h, LR_MAX_WIDTH, LR_MAX_HEIGHT,
+                                                   (float)frame_w / (float)frame_h};
+            environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &geometry);
+        }
+        video_cb(shm->pixels, frame_w, frame_h, frame_w * 4);
+    }
+    else
+        video_cb(NULL, frame_w, frame_h, 0);
+    send_audio();
+}
+
+size_t retro_serialize_size(void) { return 0; }
+bool retro_serialize(void *data, size_t size) { (void)data; (void)size; return false; }
+bool retro_unserialize(const void *data, size_t size) { (void)data; (void)size; return false; }
+void retro_cheat_reset(void) {}
+void retro_cheat_set(unsigned index, bool enabled, const char *code) { (void)index; (void)enabled; (void)code; }
+void *retro_get_memory_data(unsigned id) { (void)id; return NULL; }
+size_t retro_get_memory_size(unsigned id) { (void)id; return 0; }

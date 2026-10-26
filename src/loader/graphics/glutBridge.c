@@ -21,6 +21,7 @@
 #include "overlayMsgs.h"
 #include "../graphics/sdlCalls.h"
 #include "../hardware/lindbergh/touchScreen.h"
+#include "../libretro/libretroBridge.h"
 
 extern uint32_t gId;
 extern int gGrp;
@@ -103,7 +104,9 @@ void bridgeGlutSwapBuffers(void)
 
     SDL_GL_SwapWindow(g_SdlWindow);
 
-    if (config->fpsLimiter)
+    if (libretroMode())
+        libretroFrame();
+    else if (config->fpsLimiter)
         frameTiming();
 
     double fps_val = calculateFps();

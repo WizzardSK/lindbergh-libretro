@@ -1,0 +1,123 @@
+name: Libretro core
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - libretro
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache APT packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ hashFiles('**/install-packages.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      # The loader and its AppDir, as the project's own AppImage build makes
+      # them: the core runs the game through that AppDir's AppRun
+      - name: Install packages
+        run: scripts/appimage/install-packages.sh
+      - name: Pack ID libs
+        run: scripts/appimage/id-libs.sh
+      - name: Install Kisak
+        run: scripts/appimage/install-kisak.sh
+      - name: Build deps
+        run: scripts/appimage/build-deps.sh
+      - name: Pack libs
+        run: scripts/appimage/pack-libs.sh
+      - name: Loader and AppDir
+        shell: bash
+        run: |
+          make linux
+          scripts/appimage/make-appimage.sh
+
+      - name: Core
+        run: CC=gcc make -f Makefile.libretro
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/cores dist/info dist/system/lindbergh
+          cp build/lindbergh_libretro.so dist/cores/
+          strip dist/cores/lindbergh_libretro.so
+          cp lindbergh_libretro.info dist/info/
+          cp -a build-linux/linuxloader.AppDir/. dist/system/lindbergh/
+          git rev-parse --short HEAD > dist/system/lindbergh/build
+          tar -czf lindbergh_libretro-linux-x86_64.tar.gz -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lindbergh_libretro-linux-x86_64
+          path: lindbergh_libretro-linux-x86_64.tar.gz
+
+  # box64 with BOX32, which runs 32-bit x86 programs on 64-bit ARM: the
+  # loader and the game on aarch64
+  box64:
+    name: box64 (BOX32)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: box64-out
+          key: box64-box32-${{ hashFiles('.github/workflows/libretro.yml') }}
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/ptitSeb/box64.git
+          cmake -S box64 -B box64/build -DARM_DYNAREC=ON -DBOX32=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build box64/build -j"$(nproc)"
+          mkdir -p box64-out
+          cp box64/build/box64 box64-out/
+          git -C box64 rev-parse --short HEAD > box64-out/box64.version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: box64-box32
+          path: box64-out/
+
+  linux-aarch64:
+    name: Linux aarch64
+    needs: [linux-x86_64, box64]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lindbergh_libretro-linux-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: box64-box32
+          path: box64-out
+      - name: Core
+        run: CC=gcc make -f Makefile.libretro
+      - name: Package
+        shell: bash
+        run: |
+          # the x86 loader's AppDir, with box64 beside it
+          mkdir x86 && tar -xzf lindbergh_libretro-linux-x86_64.tar.gz -C x86
+          mkdir -p dist/cores dist/info
+          cp build/lindbergh_libretro.so dist/cores/
+          strip dist/cores/lindbergh_libretro.so
+          cp lindbergh_libretro.info dist/info/
+          cp -a x86/system dist/
+          install -m 755 box64-out/box64 dist/system/lindbergh/box64
+          cp box64-out/box64.version dist/system/lindbergh/
+          tar -czf lindbergh_libretro-linux-aarch64.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lindbergh_libretro-linux-aarch64
+          path: lindbergh_libretro-linux-aarch64.tar.gz

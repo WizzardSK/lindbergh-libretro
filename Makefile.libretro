@@ -1,0 +1,15 @@
+# The libretro core (64-bit, for the frontend); the loader it runs is the
+# 32-bit build of the main Makefile
+CC ?= gcc
+CFLAGS ?= -O2
+CFLAGS += -fPIC -Wall -Wextra -Wno-unused-parameter -std=gnu11
+LDFLAGS += -shared -Wl,--no-undefined -Wl,--version-script=src/libretro/link.T
+
+TARGET = build/lindbergh_libretro.so
+
+$(TARGET): src/libretro/lindbergh_libretro.c src/libretro/libretro_shm.h
+	mkdir -p build
+	$(CC) $(CFLAGS) src/libretro/lindbergh_libretro.c -o $@ $(LDFLAGS) -lrt
+
+clean:
+	rm -f $(TARGET)
