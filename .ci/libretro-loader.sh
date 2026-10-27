@@ -9,6 +9,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -o Acquire::Retries=3 update
 apt-get -o Acquire::Retries=3 -y install --no-install-recommends sudo git ca-certificates \
   software-properties-common gpg-agent wget file make
+# the checkout may belong to another user than the job's
+git config --global --add safe.directory "$PWD"
 # their apt and PPA steps; install-kisak.sh's snap and kernel holds have
 # nothing to hold in a container and only print errors
 bash scripts/appimage/install-packages.sh

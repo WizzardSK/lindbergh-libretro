@@ -4,6 +4,8 @@ name: GitLab preflight
 # buildbot cannot be run from here
 on:
   workflow_dispatch:
+  push:
+    branches: [gitlab-ci]
 
 jobs:
   loader-x86:
@@ -13,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -c 'git config --global --add safe.directory /src; bash .ci/libretro-loader.sh'
+      - run: docker run --rm -v "$PWD":/src -w /src ubuntu:22.04 bash -c 'bash .ci/libretro-loader.sh'
       - uses: actions/upload-artifact@v4
         with:
           name: loader-x86
@@ -30,7 +32,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: loader-x86
-      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:22.04 bash -c 'git config --global --add safe.directory /src; bash .ci/libretro-linux.sh && ls -la lindbergh_libretro.so'
+      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:22.04 bash -c 'bash .ci/libretro-linux.sh && ls -la lindbergh_libretro.so'
 
   linux-aarch64:
     needs: loader-x86
@@ -43,7 +45,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: loader-x86
-      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:24.04 bash -c 'git config --global --add safe.directory /src; bash .ci/libretro-linux.sh && ls -la lindbergh_libretro.so'
+      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:24.04 bash -c 'bash .ci/libretro-linux.sh && ls -la lindbergh_libretro.so'
 
   windows-x64:
     runs-on: ubuntu-24.04
@@ -52,4 +54,4 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:24.04 bash -c 'git config --global --add safe.directory /src; bash .ci/libretro-windows.sh && ls -la lindbergh_libretro.dll'
+      - run: docker run --rm -e NUMPROC=1 -v "$PWD":/src -w /src ubuntu:24.04 bash -c 'bash .ci/libretro-windows.sh && ls -la lindbergh_libretro.dll'

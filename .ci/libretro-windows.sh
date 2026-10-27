@@ -10,6 +10,8 @@ J=$(( ${NUMPROC:-0} > 0 ? NUMPROC : 1 ))
 apt-get -o Acquire::Retries=3 update
 apt-get -o Acquire::Retries=3 -y install --no-install-recommends mingw-w64 mingw-w64-i686-dev \
   cmake make zip unzip git ca-certificates
+# the checkout may belong to another user than the job's
+git config --global --add safe.directory "$PWD"
 bash scripts/windows/windows-build.sh
 mkdir -p dist/system/lindbergh
 cp -a win-release/. dist/system/lindbergh/
