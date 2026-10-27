@@ -8,7 +8,7 @@ The core is the one file to install: `lindbergh_libretro.so` (Linux) or `lindber
 
 ## Content
 
-Content is the game's ELF from its dump (for example `disk0/elf/` or the game's program folder), or a `.lindbergh` text file holding the ELF's path, absolute or relative to the text file. The game's folders stay as the dump has them: a game opens its data relative to its program's folder (House of the Dead 4 expects `../fs/`). The game's `linuxloader.ini` and `controls.ini` in its folder work as they do standalone (`linuxloader --create config` writes a default one); the loader keeps a game's settings in `eeprom.bin` and `sram.bin` there too. Which games run, and which ELF each one starts from, is in the loader's [Linux](docs/guide-linux.md) and [Windows](docs/guide-windows.md) guides.
+Content is the game's ELF from its dump (for example `disk0/elf/` or the game's program folder), or a `.lindbergh` text file holding the ELF's path, absolute or relative to the text file. The game's folders stay as the dump has them: a game opens its data relative to its program's folder (House of the Dead 4 expects `../fs/`). The game's `linuxloader.ini` and `controls.ini` in its folder work as they do standalone (`linuxloader --create config` writes a default one); the core has the loader keep a game's settings in RetroArch's `saves/Lindbergh/`, by the game's DVP (`DVP-0015.eeprom.bin` and `.sram.bin`), so a game's test program and the game share them; the `eeprom.bin` and `sram.bin` in the game's folder are copied there the first time. Which games run, and which ELF each one starts from, is in the loader's [Linux](docs/guide-linux.md) and [Windows](docs/guide-windows.md) guides.
 
 ## Core options
 

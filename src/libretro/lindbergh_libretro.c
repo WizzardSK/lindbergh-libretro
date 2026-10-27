@@ -72,6 +72,9 @@ static bool test_mode;
 static bool audio_thread;
 /* The game of the content and where the loader runs it from */
 static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
+/* RetroArch's saves/Lindbergh, where the loader keeps each game's EEPROM and
+ * SRAM by its DVP (init.c); empty without a saves directory */
+static char s_saves[PATH_MAX];
 static bool pointer_lightgun = true;
 /* The Steering Response option: the left stick's X on a curve, with its
  * Inner Zone (the share of the turn at the centre) and Effect (the power of
@@ -543,7 +546,6 @@ static void keyboard_event(bool down, unsigned keycode, uint32_t character, uint
     __atomic_store_n(&shm->key_head, head + 1, __ATOMIC_RELEASE);
 }
 
-#ifdef LR_EMBEDDED_SYSTEM
 /* Every directory of a path down to its last separator */
 static void make_dirs(char *path)
 {
@@ -561,7 +563,6 @@ static void make_dirs(char *path)
         *p = c;
     }
 }
-#endif
 
 /* The loader this core carries (the build's system/lindbergh, as a zip)
  * written to root when what is there is from another build or missing, as
@@ -693,6 +694,7 @@ static bool start_loader(void)
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", strcmp(resolution, "native") ? resolution : NULL);
     /* the Free Play option, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", freeplay);
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", s_saves[0] ? s_saves : NULL);
     BOOL started = CreateProcessA(exe, cmdline, NULL, NULL, log_file != INVALID_HANDLE_VALUE,
                                   CREATE_NO_WINDOW, NULL, dir, &si, &pi);
     DWORD error = GetLastError();
@@ -700,6 +702,7 @@ static bool start_loader(void)
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", NULL);
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", NULL);
     if (log_file != INVALID_HANDLE_VALUE)
         CloseHandle(log_file);
     if (!started)
@@ -756,6 +759,8 @@ static bool start_loader(void)
         /* the Free Play option, over linuxloader.ini's (init.c) */
         if (freeplay)
             setenv("LINDBERGH_LIBRETRO_FREEPLAY", freeplay, 1);
+        if (s_saves[0])
+            setenv("LINDBERGH_LIBRETRO_SAVES", s_saves, 1);
 #if defined(__aarch64__)
         /* what AppRun sets, for the x86 libraries box64 loads */
         char libs[PATH_MAX * 2];
@@ -809,6 +814,18 @@ bool retro_load_game(const struct retro_game_info *game)
 
     const char *system = NULL;
     environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
+    const char *saves = NULL;
+    s_saves[0] = 0;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &saves) && saves && *saves)
+    {
+#ifdef _WIN32
+        snprintf(s_saves, sizeof(s_saves), "%s\\Lindbergh\\", saves);
+#else
+        snprintf(s_saves, sizeof(s_saves), "%s/Lindbergh/", saves);
+#endif
+        make_dirs(s_saves);
+        s_saves[strlen(s_saves) - 1] = 0;
+    }
     char root[PATH_MAX];
     snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
     if (!install_loader(root))
