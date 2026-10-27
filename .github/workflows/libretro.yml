@@ -95,12 +95,12 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          # the core and its info as they are: the artifact is the one zip,
-          # and the core carries the loader (NNshi)
-          mkdir -p pkg/cores pkg/info
-          cp build/lindbergh_libretro.dll pkg/cores/
-          x86_64-w64-mingw32-strip pkg/cores/lindbergh_libretro.dll
-          cp lindbergh_libretro.info pkg/info/
+          # the core and its info side by side, no folders: the artifact is
+          # the one zip, and the core carries the loader (NNshi)
+          mkdir -p pkg
+          cp build/lindbergh_libretro.dll pkg/
+          x86_64-w64-mingw32-strip pkg/lindbergh_libretro.dll
+          cp lindbergh_libretro.info pkg/
       - uses: actions/upload-artifact@v4
         with:
           name: lindbergh_libretro-windows-x86_64

@@ -4,7 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
-- The Windows build's artifact holds `cores/lindbergh_libretro.dll` and `info/lindbergh_libretro.info` as they are, with no zip inside and no `system/` (NNshi).
+- The Windows build's artifact holds `lindbergh_libretro.dll` and `lindbergh_libretro.info` side by side, with no folders, no zip inside and no `system/` (NNshi).
 - New option Audio Thread (Restart), off by default: the sound goes to RetroArch's audio thread (SET_AUDIO_CALLBACK) as the loader mixes it, by the loader's clock as in the loader alone, so it keeps its pace where a game drops frames, as Initial D 4's car select at 40 fps; OutRun 2 SP's announcer is lost with it (NNshi). Where RetroArch has no audio thread to give (recording), a frame's worth each run as with it off.
 - The core carries the loader and writes it to `system/lindbergh/` at load when what is there is from another build or missing, so the core is the one file to install (NNshi). Its zip is made by the build (miniz, MIT, in `src/libretro/miniz/` reads it).
 - The pads' triggers (L2 and R2, gas and brake in the driving games) reach the game: the core's pads sent them from 0 at rest, where SDL reads a trigger from -32768 at rest as a pad's driver reports it, so they sat half held and the games took no gas or brake (NNshi, OutRun 2 SP, Initial D 4).
