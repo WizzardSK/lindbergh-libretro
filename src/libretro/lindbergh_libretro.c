@@ -72,8 +72,9 @@ static bool test_mode;
 static bool audio_thread;
 /* The game of the content and where the loader runs it from */
 static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
-/* RetroArch's saves/Lindbergh, where the loader keeps each game's EEPROM and
- * SRAM by its DVP (init.c); empty without a saves directory */
+/* RetroArch's saves directory for the core (saves/Lindbergh when sorted by
+ * core), where the loader keeps each game's EEPROM and SRAM by its DVP
+ * (init.c); empty without one */
 static char s_saves[PATH_MAX];
 static bool pointer_lightgun = true;
 /* The Steering Response option: the left stick's X on a curve, with its
@@ -818,10 +819,13 @@ bool retro_load_game(const struct retro_game_info *game)
     s_saves[0] = 0;
     if (environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &saves) && saves && *saves)
     {
+        /* the saves directory as RetroArch gives it, which with its saves
+         * sorted by core is saves/Lindbergh already (NNshi: one more
+         * Lindbergh made saves/Lindbergh/Lindbergh) */
 #ifdef _WIN32
-        snprintf(s_saves, sizeof(s_saves), "%s\\Lindbergh\\", saves);
+        snprintf(s_saves, sizeof(s_saves), "%s\\", saves);
 #else
-        snprintf(s_saves, sizeof(s_saves), "%s/Lindbergh/", saves);
+        snprintf(s_saves, sizeof(s_saves), "%s/", saves);
 #endif
         make_dirs(s_saves);
         s_saves[strlen(s_saves) - 1] = 0;
