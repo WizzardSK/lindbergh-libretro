@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 #define LR_SHM_MAGIC 0x4C424C52u /* "RLBL" */
-#define LR_SHM_VERSION 2
+#define LR_SHM_VERSION 3
 
 #define LR_MAX_WIDTH 5120
 #define LR_MAX_HEIGHT 2880
@@ -82,6 +82,10 @@ typedef struct LrShm {
     uint32_t audio_rate;
     volatile uint32_t audio_write; /* in frames, wraps at LR_AUDIO_FRAMES */
     volatile uint32_t audio_read;  /* written by the core */
+    /* the drive board's force feedback as player 1's rumble: strong (left)
+     * and weak (right) 0..65535 for duration_ms, one more rumble_seq each */
+    uint32_t rumble_strong, rumble_weak, rumble_ms;
+    volatile uint32_t rumble_seq;
     int16_t audio[LR_AUDIO_FRAMES * 2];
     uint32_t pixels[LR_MAX_WIDTH * LR_MAX_HEIGHT]; /* XRGB8888, top row first */
 } LrShm;

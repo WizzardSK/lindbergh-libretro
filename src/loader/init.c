@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "config/config.h"
 
 #include "hardware/lindbergh/cardReader.h"
@@ -58,6 +60,11 @@ void initMain(char *configPath, char *controlsPath)
         getConfig()->width = resolutionW;
         getConfig()->height = resolutionH;
     }
+
+    /* the libretro core's Free Play option, over linuxloader.ini's */
+    const char *freeplay = getenv("LINDBERGH_LIBRETRO_FREEPLAY");
+    if (freeplay && (!strcmp(freeplay, "0") || !strcmp(freeplay, "1")))
+        getConfig()->freeplay = freeplay[0] - '0';
 
     gId = getConfig()->crc32;
     gGrp = getConfig()->gameGroup;

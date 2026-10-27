@@ -73,8 +73,23 @@ static bool audio_thread;
 /* The game of the content and where the loader runs it from */
 static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
 static bool pointer_lightgun = true;
+/* The Steering Response option: the left stick's X on a curve, with its
+ * Inner Zone (the share of the turn at the centre) and Effect (the power of
+ * the outer part, 2 or 3) */
+static bool steering_log;
+/* Input > Force Feedback to Rumble */
+static bool ffb_rumble = true;
+static float steering_inner = 0.25f;
+static int steering_power = 3;
 /* WIDTHxHEIGHT for the loader, or "native" for linuxloader.ini's */
 static char resolution[16] = "native";
+/* The Free Play option: "1" or "0" for the loader, NULL for the game's own */
+static const char *freeplay;
+/* RetroArch's rumble, for the drive board's force feedback */
+static struct retro_rumble_interface rumble;
+/* The last force feedback taken, and the frames it has still to run */
+static uint32_t rumble_seq;
+static unsigned rumble_frames;
 static int16_t *audio_out;
 static double sample_rate = 48000.0;
 
@@ -99,25 +114,135 @@ static const char *get_option(const char *key, const char *fallback)
     return fallback;
 }
 
+static bool update_option_display(void);
+
 static void read_options(void)
 {
     test_mode = !strcmp(get_option("lindbergh_test_mode", "disabled"), "enabled");
     audio_thread = !strcmp(get_option("lindbergh_audio_thread", "disabled"), "enabled");
     pointer_lightgun = !strcmp(get_option("lindbergh_pointer", "lightgun"), "lightgun");
+    steering_log = !strcmp(get_option("lindbergh_steering", "linear"), "logarithmic");
+    ffb_rumble = strcmp(get_option("lindbergh_ffb_rumble", "enabled"), "disabled") != 0;
+    steering_inner = atoi(get_option("lindbergh_steering_inner", "25")) / 100.0f;
+    if (steering_inner < 0.05f || steering_inner > 0.5f)
+        steering_inner = 0.25f;
+    steering_power = !strcmp(get_option("lindbergh_steering_effect", "cubic"), "square") ? 2 : 3;
+    if (environ_cb)
+        update_option_display();
     snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
+    const char *fp = get_option("lindbergh_freeplay", "default");
+    freeplay = !strcmp(fp, "enabled") ? "1" : !strcmp(fp, "disabled") ? "0" : NULL;
+}
+
+/* The core options, with their tooltips (RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2;
+ * a frontend without it gets them as plain variables, built from these) */
+static struct retro_core_option_v2_category option_categories[] = {
+    {"video", "Video", "The resolution the games render at."},
+    {"input", "Input", "The pointer, steering and force feedback."},
+    {"audio", "Audio", "How the sound reaches RetroArch."},
+    {"system", "System", "Test mode and free play."},
+    {NULL, NULL, NULL},
+};
+
+static struct retro_core_option_v2_definition option_definitions[] = {
+    {"lindbergh_resolution", "Resolution (Restart)", NULL,
+     "The width and height the games the loader can patch render at. Native keeps the linuxloader.ini's. Every frame goes through system memory to RetroArch, so the highest ones cost speed.",
+     NULL, "video",
+     {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
+     "native"},
+    {"lindbergh_pointer", "Pointer", NULL,
+     "What aims in the gun games. Light Gun: RetroArch's light gun, its trigger, reload and aux A as the buttons. Mouse: RetroArch's pointer, the mouse's position or touch. The mouse's buttons fire with either.",
+     NULL, "input",
+     {{"lightgun", "Light Gun"}, {"mouse", "Mouse"}, {NULL, NULL}},
+     "lightgun"},
+    {"lindbergh_ffb_rumble", "Force Feedback to Rumble", NULL,
+     "The drive board's force feedback as rumble on player 1's pad. Supported: OutRun 2 SP SDX (all revisions), the game the loader emulates the drive board for. Others only with EMULATE_DRIVEBOARD = 1 in their linuxloader.ini, if they drive that board (Initial D does not).",
+     NULL, "input",
+     {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+     "enabled"},
+    {"lindbergh_steering", "Steering Response", NULL,
+     "Linear: the left stick's X as it is. Logarithmic: on a curve with less of the turn around the centre and steeper towards the ends, as the Sega System 32 racers' dip switch has it, so a stick steers less twitchily. Its shape is set by Steering Inner Zone and Steering Effect.",
+     NULL, "input",
+     {{"linear", "Linear"}, {"logarithmic", "Logarithmic"}, {NULL, NULL}},
+     "linear"},
+    {"lindbergh_steering_inner", "Steering Inner Zone", NULL,
+     "With logarithmic steering: the share of the turn at the centre. Lower is calmer around the centre. OutRun 2 plays well at 20 with Square, Initial D at 50 with Cubic.",
+     NULL, "input",
+     {{"5", "5%"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {NULL, NULL}},
+     "25"},
+    {"lindbergh_steering_effect", "Steering Effect", NULL,
+     "With logarithmic steering: how the rest of the turn rises towards full lock. Cubic is strong, Square weak.",
+     NULL, "input",
+     {{"cubic", "Cubic (Strong)"}, {"square", "Square (Weak)"}, {NULL, NULL}},
+     "cubic"},
+    {"lindbergh_audio_thread", "Audio Thread (Restart)", NULL,
+     "Hands the sound to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames. Off by default: OutRun 2 SP's announcer is lost with it.",
+     NULL, "audio",
+     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
+     "disabled"},
+    {"lindbergh_test_mode", "Test Mode (Restart)", NULL,
+     "Starts the game in test mode, as the loader's -t does.",
+     NULL, "system",
+     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
+     "disabled"},
+    {"lindbergh_freeplay", "Free Play (Restart)", NULL,
+     "Default leaves the game's own setting. Enabled or Disabled writes it to the game's EEPROM at start, as the linuxloader.ini's FREEPLAY does.",
+     NULL, "system",
+     {{"default", "Default"}, {"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+     "default"},
+    {NULL, NULL, NULL, NULL, NULL, NULL, {{NULL, NULL}}, NULL},
+};
+
+/* Steering Inner Zone and Effect only with the curve on: shown or hidden as
+ * the option changes in the menu, not only at its next opening (NNshi) */
+static bool update_option_display(void)
+{
+    static int shown = -1;
+    const bool log = !strcmp(get_option("lindbergh_steering", "linear"), "logarithmic");
+    if (shown == (int)log)
+        return false;
+    shown = log;
+    static const char *const curve_options[] = {"lindbergh_steering_inner", "lindbergh_steering_effect"};
+    for (unsigned i = 0; i < 2; i++)
+    {
+        struct retro_core_option_display display = {curve_options[i], log};
+        environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &display);
+    }
+    return true;
+}
+
+static void set_core_options(retro_environment_t cb)
+{
+    unsigned version = 0;
+    if (cb(RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &version) && version >= 2)
+    {
+        struct retro_core_options_v2 options = {option_categories, option_definitions};
+        cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2, &options);
+        struct retro_core_options_update_display_callback display = {update_option_display};
+        cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK, &display);
+        return;
+    }
+    /* "Label; default|other|..." for each, the default first */
+    enum { COUNT = sizeof(option_definitions) / sizeof(option_definitions[0]) };
+    static struct retro_variable vars[COUNT];
+    static char text[COUNT][512];
+    for (unsigned i = 0; option_definitions[i].key; i++)
+    {
+        const struct retro_core_option_v2_definition *d = &option_definitions[i];
+        int n = snprintf(text[i], sizeof(text[i]), "%s; %s", d->desc, d->default_value);
+        for (unsigned v = 0; d->values[v].value && n > 0 && n < (int)sizeof(text[i]); v++)
+            if (strcmp(d->values[v].value, d->default_value))
+                n += snprintf(text[i] + n, sizeof(text[i]) - n, "|%s", d->values[v].value);
+        vars[i].key = d->key;
+        vars[i].value = text[i];
+    }
+    cb(RETRO_ENVIRONMENT_SET_VARIABLES, vars);
 }
 
 void retro_set_environment(retro_environment_t cb)
 {
     environ_cb = cb;
-    static const struct retro_variable vars[] = {
-        {"lindbergh_test_mode", "Test Mode (Restart); disabled|enabled"},
-        {"lindbergh_resolution", "Resolution (Restart); native|1280x720|1920x1080|2560x1440|3840x2160|5120x2880"},
-        {"lindbergh_pointer", "Pointer; lightgun|mouse"},
-        {"lindbergh_audio_thread", "Audio Thread (Restart); disabled|enabled"},
-        {NULL, NULL},
-    };
-    cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
+    set_core_options(cb);
     bool no_game = false;
     cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
     struct retro_log_callback logging;
@@ -566,12 +691,15 @@ static bool start_loader(void)
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", "dummy");
     /* the Resolution option, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", strcmp(resolution, "native") ? resolution : NULL);
+    /* the Free Play option, over linuxloader.ini's (init.c) */
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", freeplay);
     BOOL started = CreateProcessA(exe, cmdline, NULL, NULL, log_file != INVALID_HANDLE_VALUE,
                                   CREATE_NO_WINDOW, NULL, dir, &si, &pi);
     DWORD error = GetLastError();
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", NULL);
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", NULL);
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", NULL);
     if (log_file != INVALID_HANDLE_VALUE)
         CloseHandle(log_file);
     if (!started)
@@ -625,6 +753,9 @@ static bool start_loader(void)
         /* the Resolution option, over linuxloader.ini's (init.c) */
         if (strcmp(resolution, "native"))
             setenv("LINDBERGH_LIBRETRO_RESOLUTION", resolution, 1);
+        /* the Free Play option, over linuxloader.ini's (init.c) */
+        if (freeplay)
+            setenv("LINDBERGH_LIBRETRO_FREEPLAY", freeplay, 1);
 #if defined(__aarch64__)
         /* what AppRun sets, for the x86 libraries box64 loads */
         char libs[PATH_MAX * 2];
@@ -668,6 +799,10 @@ bool retro_load_game(const struct retro_game_info *game)
         return false;
     struct retro_keyboard_callback keyboard = {keyboard_event};
     environ_cb(RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, &keyboard);
+    if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble))
+        memset(&rumble, 0, sizeof(rumble));
+    rumble_seq = 0;
+    rumble_frames = 0;
     struct retro_audio_callback audio = {audio_callback, audio_set_state};
     audio_async = audio_thread && environ_cb(RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK, &audio);
     lr_log(RETRO_LOG_INFO, "audio: %s\n", audio_async ? "on RetroArch's audio thread" : "a frame's worth each run");
@@ -709,10 +844,30 @@ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, 
 
 void retro_unload_game(void)
 {
+    if (rumble.set_rumble_state)
+    {
+        rumble.set_rumble_state(0, RETRO_RUMBLE_STRONG, 0);
+        rumble.set_rumble_state(0, RETRO_RUMBLE_WEAK, 0);
+    }
     stop_loader();
 }
 
 unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
+
+/* Steering Response's logarithmic curve, as the Sega System 32 racers' dip
+ * switch has it (NNshi, after FBNeo's F1 Super Lap): the Inner Zone's share
+ * of the turn around the centre, steeper towards the ends, so a stick steers
+ * less twitchily; i x + (1 - i) x^n with n 3 (Cubic, strong) or 2 (Square,
+ * weak), full turn at full tilt */
+static int16_t steering_curve(int16_t v)
+{
+    const float x = v / 32767.0f;
+    const float ax = x < 0 ? -x : x;
+    const float outer = steering_power == 2 ? x * ax : x * x * x;
+    float y = steering_inner * x + (1.0f - steering_inner) * outer;
+    y = y > 1.0f ? 1.0f : y < -1.0f ? -1.0f : y;
+    return (int16_t)(y * 32767.0f);
+}
 
 static int16_t axis(unsigned port, unsigned index, unsigned id)
 {
@@ -747,6 +902,8 @@ static void write_input(void)
                 buttons |= 1u << map[i].lr;
         LrPad pad = {buttons, {0}};
         pad.axes[LR_AXIS_LX] = axis(p, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+        if (steering_log)
+            pad.axes[LR_AXIS_LX] = steering_curve(pad.axes[LR_AXIS_LX]);
         pad.axes[LR_AXIS_LY] = axis(p, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
         pad.axes[LR_AXIS_RX] = axis(p, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X);
         pad.axes[LR_AXIS_RY] = axis(p, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y);
@@ -903,6 +1060,41 @@ static void send_audio(void)
         audio_batch_cb(audio_out, frames);
 }
 
+/* The drive board's force feedback (forceFeedback.c) on player 1's pad, for
+ * as long as the loader asked, then stopped */
+static void update_rumble(void)
+{
+    if (!rumble.set_rumble_state)
+        return;
+    if (!ffb_rumble)
+    {
+        /* off: what was running stops, the rest is not taken */
+        if (rumble_frames)
+        {
+            rumble_frames = 0;
+            rumble.set_rumble_state(0, RETRO_RUMBLE_STRONG, 0);
+            rumble.set_rumble_state(0, RETRO_RUMBLE_WEAK, 0);
+        }
+        rumble_seq = __atomic_load_n(&shm->rumble_seq, __ATOMIC_ACQUIRE);
+        return;
+    }
+    uint32_t seq = __atomic_load_n(&shm->rumble_seq, __ATOMIC_ACQUIRE);
+    if (seq != rumble_seq)
+    {
+        rumble_seq = seq;
+        rumble.set_rumble_state(0, RETRO_RUMBLE_STRONG, (uint16_t)shm->rumble_strong);
+        rumble.set_rumble_state(0, RETRO_RUMBLE_WEAK, (uint16_t)shm->rumble_weak);
+        rumble_frames = (shm->rumble_ms * 60 + 999) / 1000;
+        if (!rumble_frames)
+            rumble_frames = 1;
+    }
+    else if (rumble_frames && !--rumble_frames)
+    {
+        rumble.set_rumble_state(0, RETRO_RUMBLE_STRONG, 0);
+        rumble.set_rumble_state(0, RETRO_RUMBLE_WEAK, 0);
+    }
+}
+
 void retro_run(void)
 {
     bool updated = false;
@@ -946,6 +1138,7 @@ void retro_run(void)
     check_audio_rate();
     if (!audio_async)
         send_audio();
+    update_rumble();
 }
 
 size_t retro_serialize_size(void) { return 0; }

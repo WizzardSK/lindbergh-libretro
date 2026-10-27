@@ -6,6 +6,7 @@
 #include "forceFeedback.h"
 #include "../../input/sdlInput.h"
 #include "../../log/log.h"
+#include "../../libretro/libretroBridge.h"
 
 static int effect_id = -1;
 extern SDLControllers sdlJoysticks;
@@ -83,6 +84,12 @@ void sdlFfbInit(void)
 
 void sdlFfbRumble(float left, float right, int duration_ms)
 {
+    /* the core's pads are virtual, without haptics: RetroArch's rumble */
+    if (libretroMode())
+    {
+        libretroRumble(left, right, duration_ms);
+        return;
+    }
     if (!sdlJoysticks.haptics[0])
         return;
     SDL_HapticEffect effect;

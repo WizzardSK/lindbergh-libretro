@@ -14,5 +14,7 @@ void libretroAttachPads();
 void libretroPollInput();
 /* At the game's buffer swap: the frame to the core, then its next run */
 void libretroFrame();
+/* The drive board's force feedback to the core's rumble, 0..1 each */
+void libretroRumble(float left, float right, int duration_ms);
 
 #endif

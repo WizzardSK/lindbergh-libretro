@@ -298,6 +298,16 @@ void libretroFrame()
         _exit(0);
 }
 
+void libretroRumble(float left, float right, int duration_ms)
+{
+    if (!shm)
+        return;
+    shm->rumble_strong = (uint32_t)(SDL_clamp(left, 0.0f, 1.0f) * 65535.0f);
+    shm->rumble_weak = (uint32_t)(SDL_clamp(right, 0.0f, 1.0f) * 65535.0f);
+    shm->rumble_ms = duration_ms > 0 ? (uint32_t)duration_ms : 0;
+    __atomic_add_fetch(&shm->rumble_seq, 1, __ATOMIC_RELEASE);
+}
+
 /* The device's blocks at the rate they would play at: each mixed block waits
  * until the clock reaches its end, as a sound card would take it. After a
  * stall of more than 100 ms the clock starts over rather than catching up. */
