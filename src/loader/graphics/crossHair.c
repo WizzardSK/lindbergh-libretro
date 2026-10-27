@@ -287,7 +287,8 @@ void renderCrosshairs(void)
     GLint lastBlendEq = GL_FUNC_ADD;
     glad_glGetIntegerv(GL_BLEND_EQUATION_RGB, &lastBlendEq);
 
-    glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    /* the game's framebuffer 0, its own one for the libretro core */
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, lrGameFramebuffer(0));
     // glad_glViewport(0, 0, renderWidth, renderHeight);
 
     glad_glDisable(GL_DEPTH_TEST);

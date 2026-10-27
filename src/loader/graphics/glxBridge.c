@@ -144,6 +144,9 @@ bool bridgeGlxMakeContextCurrent(Display *dpy, GLXDrawable drawable, GLXDrawable
         log_error("glXMakeCurrent failed for window %p context %p: %s\n", (void *)target_window, (void *)ctx, SDL_GetError());
         return 0;
     }
+    /* the game's framebuffer 0 again, which is the context's own binding */
+    if ((SDL_GLContext)ctx == getSDLContext())
+        lrOffscreenBind();
 
     return 1;
 }

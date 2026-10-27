@@ -225,6 +225,7 @@ void startSDL()
     }
 
     initBlitting();
+    lrOffscreenBind();
 
     if (gId != PRIMEVAL_HUNT_SBPP && gGrp != GROUP_LGJ)
         SDL_SetWindowResizable(g_SdlWindow, true);

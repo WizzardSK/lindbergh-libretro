@@ -10,6 +10,7 @@
 #include "../config/config.h"
 #include "../log/log.h"
 #include "../patching/patchResolution.h"
+#include "../libretro/libretroBridge.h"
 // #include "glInitFunctions.h"
 
 #define CHECK_GL(msg)                                                                                                                      \
@@ -42,6 +43,9 @@ int gameIsOutrunChihiroMode = 0;
 int fboInitialized = false;
 GLuint fboId = 0;
 GLuint fboTextureId = 0;
+
+unsigned int lrGameFbo = 0;
+static GLuint lrGameTexture, lrGameDepth;
 
 int drawableW = 1;
 int drawableH = 1;
@@ -116,6 +120,88 @@ int blitInitializeFbo()
 
     fboInitialized = true;
     return 1;
+}
+
+void lrOffscreenBind(void)
+{
+#ifdef _WIN32
+    if (!libretroMode() || gameIsOutrunChihiroMode)
+        return;
+    if (!lrGameFbo)
+    {
+        /* Only for a size the screen cannot hold: the window does up to
+         * there, and OutRun 2 SP lost textures on a framebuffer of the
+         * core's even at its native 800x480 (NNshi) */
+        static int checked;
+        if (!checked)
+        {
+            checked = 1;
+            const SDL_DisplayMode *screen = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+            if (screen && gWidth <= screen->w && gHeight <= screen->h)
+            {
+                log_info("libretro: %dx%d fits the %dx%d screen, the game draws to its window\n", gWidth, gHeight, screen->w,
+                         screen->h);
+                return;
+            }
+        }
+        else
+            return;
+        int w = gWidth, h = gHeight;
+        if (blitWidth > w)
+            w = blitWidth;
+        if (renderWidth > w)
+            w = renderWidth;
+        if (blitHeight > h)
+            h = blitHeight;
+        if (renderHeight > h)
+            h = renderHeight;
+        glad_glGenTextures(1, &lrGameTexture);
+        glad_glBindTexture(GL_TEXTURE_2D, lrGameTexture);
+        glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glad_glBindTexture(GL_TEXTURE_2D, 0);
+        glad_glGenRenderbuffers(1, &lrGameDepth);
+        glad_glBindRenderbuffer(GL_RENDERBUFFER, lrGameDepth);
+        glad_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+        glad_glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        GLuint fbo = 0;
+        glad_glGenFramebuffers(1, &fbo);
+        glad_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glad_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, lrGameTexture, 0);
+        glad_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, lrGameDepth);
+        GLenum status = glad_glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            log_error("libretro: the game's %dx%d framebuffer is not complete (0x%x), drawing to the window\n", w, h, status);
+            glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glad_glDeleteFramebuffers(1, &fbo);
+            return;
+        }
+        lrGameFbo = fbo;
+        log_info("libretro: the game draws to a %dx%d framebuffer of its own\n", w, h);
+    }
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, lrGameFbo);
+    glad_glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
+#endif
+}
+
+unsigned int lrGameFramebuffer(unsigned int framebuffer)
+{
+    return framebuffer == 0 && lrGameFbo ? lrGameFbo : framebuffer;
+}
+
+unsigned int lrGameColorBuffer(unsigned int mode, bool draw)
+{
+    if (!lrGameFbo)
+        return mode;
+    if (mode != GL_BACK && mode != GL_FRONT && mode != GL_BACK_LEFT && mode != GL_FRONT_LEFT && mode != GL_FRONT_AND_BACK &&
+        mode != GL_LEFT)
+        return mode;
+    GLint bound = 0;
+    glad_glGetIntegerv(draw ? GL_DRAW_FRAMEBUFFER_BINDING : GL_READ_FRAMEBUFFER_BINDING, &bound);
+    return (GLuint)bound == lrGameFbo ? GL_COLOR_ATTACHMENT0 : mode;
 }
 
 void blitStretch()
@@ -201,10 +287,10 @@ void blitStretch()
                 // Non-MSAA path: direct blit from FB0 → fboId
                 glad_glBindFramebuffer(GL_FRAMEBUFFER, fboId);
                 CHECK_GL("bind GL_FRAMEBUFFER fboId first blit");
-                glad_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+                glad_glBindFramebuffer(GL_READ_FRAMEBUFFER, lrGameFbo);
                 CHECK_GL("bind GL_READ_FRAMEBUFFER 0 first blit");
 
-                glad_glReadBuffer(GL_BACK);
+                glad_glReadBuffer(lrGameFbo ? GL_COLOR_ATTACHMENT0 : GL_BACK);
                 CHECK_GL("readbuffer GL_BACK");
 
                 // Source: read from FB0 at game render resolution (pre-SSAA).

@@ -5,6 +5,9 @@
 #include "../graphics/shaderPatches.h"
 #include "../patching/patchResolution.h"
 #include "../graphics/crossHair.h"
+extern "C" {
+#include "../graphics/blitStretching.h"
+}
 
 
 extern "C" void __attribute__((cdecl)) wrap_glBegin(GLenum mode)
@@ -636,7 +639,7 @@ extern "C" void __attribute__((cdecl)) wrap_glGenFramebuffersEXT(GLsizei n, GLui
 extern "C" void __attribute__((cdecl)) wrap_glBindFramebufferEXT(GLenum target, GLuint framebuffer)
 {
     if (glad_glBindFramebufferEXT)
-        glad_glBindFramebufferEXT(target, framebuffer);
+        glad_glBindFramebufferEXT(target, lrGameFramebuffer(framebuffer));
 }
 
 extern "C" void __attribute__((cdecl)) wrap_glFramebufferTexture2DEXT(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,
@@ -747,7 +750,7 @@ extern "C" void __attribute__((cdecl)) wrap_glGenFramebuffers(GLsizei n, GLuint 
 extern "C" void __attribute__((cdecl)) wrap_glBindFramebuffer(GLenum target, GLuint framebuffer)
 {
     if (glad_glBindFramebuffer)
-        glad_glBindFramebuffer(target, framebuffer);
+        glad_glBindFramebuffer(target, lrGameFramebuffer(framebuffer));
 }
 
 extern "C" void __attribute__((cdecl)) wrap_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,
@@ -796,8 +799,17 @@ extern "C" void __attribute__((cdecl)) wrap_glDeleteRenderbuffers(GLsizei n, con
 
 extern "C" void __attribute__((cdecl)) wrap_glDrawBuffers(GLsizei n, const GLenum *bufs)
 {
-    if (glad_glDrawBuffers)
-        glad_glDrawBuffers(n, bufs);
+    if (!glad_glDrawBuffers)
+        return;
+    GLenum mapped[16];
+    if (lrGameFbo && n > 0 && n <= 16)
+    {
+        for (GLsizei i = 0; i < n; i++)
+            mapped[i] = lrGameColorBuffer(bufs[i], true);
+        glad_glDrawBuffers(n, mapped);
+        return;
+    }
+    glad_glDrawBuffers(n, bufs);
 }
 
 extern "C" void __attribute__((cdecl)) wrap_glPixelMapusv(GLenum map, GLsizei size, const GLushort *values)
@@ -1133,7 +1145,7 @@ extern "C" void __attribute__((cdecl)) wrap_glProgramEnvParameter4fARB(GLenum ta
 extern "C" void __attribute__((cdecl)) wrap_glReadBuffer(GLenum mode)
 {
     if (glad_glReadBuffer)
-        glad_glReadBuffer(mode);
+        glad_glReadBuffer(lrGameColorBuffer(mode, false));
 }
 
 extern "C" void __attribute__((cdecl)) wrap_glProgramEnvParameter4fvARB(GLenum target, GLuint index, const GLfloat *params)
@@ -1175,7 +1187,7 @@ extern "C" void __attribute__((cdecl)) wrap_glLoadMatrixf(const GLfloat *m)
 extern "C" void __attribute__((cdecl)) wrap_glDrawBuffer(GLenum mode)
 {
     if (glad_glDrawBuffer)
-        glad_glDrawBuffer(mode);
+        glad_glDrawBuffer(lrGameColorBuffer(mode, true));
 }
 
 extern "C" void __attribute__((cdecl)) wrap_glCheckFramebufferStatusEXT(GLenum target)
