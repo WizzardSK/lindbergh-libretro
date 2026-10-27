@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Builds: packages come from Ubuntu's own archive instead of Azure's mirror, which served some 50 KB/s, and the Windows job installs only MinGW, without upgrading the whole runner; a package fetch that stalls retries and then fails its step instead of holding the job for its whole time (NNshi).
 - Audio: the loader mixes by the clock. SDL's dummy device, which hands the mix to the core, waited a block's length in whole milliseconds (5 ms for 5.33), so it mixed some 6 % fast and the core cut the backlog every second or two; streamed music skipped, short effects hid it (NNshi).
 - The Windows build's artifact holds `lindbergh_libretro.dll` and `lindbergh_libretro.info` side by side, with no folders, no zip inside and no `system/` (NNshi).
 - New option Audio Thread (Restart), off by default: the sound goes to RetroArch's audio thread (SET_AUDIO_CALLBACK) as the loader mixes it, by the loader's clock as in the loader alone, so it keeps its pace where a game drops frames, as Initial D 4's car select at 40 fps; OutRun 2 SP's announcer is lost with it (NNshi). Where RetroArch has no audio thread to give (recording), a frame's worth each run as with it off.

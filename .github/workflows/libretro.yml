@@ -26,8 +26,15 @@ jobs:
 
       # The loader and its AppDir, as the project's own AppImage build makes
       # them: the core runs the game through that AppDir's AppRun
+      # Ubuntu's own archive instead of Azure's mirror, which served some 50 KB/s
+      # (NNshi), and a stalled fetch fails the step instead of the job's
+      # whole 40 minutes
       - name: Install packages
-        run: scripts/appimage/install-packages.sh
+        timeout-minutes: 25
+        run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|' /etc/apt/apt-mirrors.txt
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80retries
+          scripts/appimage/install-packages.sh
       - name: Pack ID libs
         run: scripts/appimage/id-libs.sh
       - name: Install Kisak
@@ -78,8 +85,16 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      # Only what the runner lacks (cmake, make and zip are on it), without
+      # the script's apt upgrade of the whole runner, and from Ubuntu's own
+      # archive instead of Azure's mirror, which served some 50 KB/s (NNshi).
+      # A stalled fetch fails the step instead of the job's whole hour.
       - name: Install packages
-        run: scripts/windows/install-packages.sh
+        timeout-minutes: 25
+        run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|' /etc/apt/apt-mirrors.txt
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -y install --no-install-recommends mingw-w64 mingw-w64-i686-dev
       - name: Loader
         shell: bash
         run: scripts/windows/windows-build.sh
