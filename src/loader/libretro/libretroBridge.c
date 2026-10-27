@@ -113,6 +113,11 @@ bool libretroMode()
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     /* Small device blocks, so the mix reaches the core in steady steps */
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");
+    /* The dummy driver waits a block's length in whole milliseconds after
+     * each (5 ms for 5.33), so it mixed some 6 % fast, and the core cut
+     * the backlog every second or two: streamed music skipped (NNshi).
+     * postmix keeps the pace by the clock instead. */
+    SDL_SetHint(SDL_HINT_AUDIO_DUMMY_TIMESCALE, "0");
 #ifdef _WIN32
     shm->loader_pid = GetCurrentProcessId();
     hookAudio();
@@ -293,6 +298,40 @@ void libretroFrame()
         _exit(0);
 }
 
+/* The device's blocks at the rate they would play at: each mixed block waits
+ * until the clock reaches its end, as a sound card would take it. After a
+ * stall of more than 100 ms the clock starts over rather than catching up. */
+static void pace(int frames, int freq)
+{
+    /* the time mixed so far in whole microseconds and a remainder, without
+     * 64-bit division: the 32-bit build has no libgcc for it */
+    static Uint64 start, mixed_us;
+    static Uint32 rest;
+    static int rate;
+    if (frames <= 0 || frames > 4000 || freq <= 0)
+        return;
+    const Uint64 now = SDL_GetTicksNS();
+    if (rate != freq || !start)
+    {
+        rate = freq;
+        start = now;
+        mixed_us = 0;
+        rest = 0;
+    }
+    rest += (Uint32)frames * 1000000u;
+    mixed_us += rest / (Uint32)freq;
+    rest %= (Uint32)freq;
+    const Uint64 due = start + mixed_us * SDL_NS_PER_US;
+    if (due > now)
+        SDL_DelayPrecise(due - now);
+    else if (now - due > 100 * SDL_NS_PER_MS)
+    {
+        start = now;
+        mixed_us = 0;
+        rest = 0;
+    }
+}
+
 /* The audio mix, at the end of SDL's mixing for the device FAudio plays to */
 static void SDLCALL postmix(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen)
 {
@@ -323,6 +362,7 @@ static void SDLCALL postmix(void *userdata, const SDL_AudioSpec *spec, float *bu
         write++;
     }
     shm->audio_write = write;
+    pace(frames, spec->freq);
 }
 
 static void attachPostmix(SDL_AudioStream *stream)
