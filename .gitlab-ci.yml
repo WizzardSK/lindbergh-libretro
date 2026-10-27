@@ -1,0 +1,109 @@
+# DESCRIPTION: GitLab CI/CD for libRetro (NOT FOR GitLab-proper)
+#
+# Linux x64, Linux aarch64 and Windows x64.
+#
+# The core is small, but it carries the loader, which runs the game as a
+# 32-bit x86 program of its own and is built as the project's own builds make
+# it: on Linux its AppImage build (scripts/appimage/: Ubuntu's 32-bit
+# libraries, Kisak's 32-bit Mesa, SDL3 and FAudio built for 32-bit), on
+# Windows its MinGW build. The buildbot's images have none of that, so the
+# jobs run in Ubuntu images with the packages those scripts install
+# (.ci/libretro-*.sh), as the xemu core's do. The loader is built once, in
+# the build-prepare stage, for both Linux cores; on aarch64 box64 runs it.
+# The templates give the jobs their stage, runner tags and artifacts; the
+# scripts replace the templates' make steps.
+#
+# The GitHub workflow (.github/workflows/libretro.yml) builds the same cores.
+
+##############################################################################
+################################# BOILERPLATE ################################
+##############################################################################
+
+variables:
+  GIT_SUBMODULE_STRATEGY: none
+  # The commit the core names as its loader's build (git rev-parse)
+  GIT_DEPTH: 0
+
+.core-defs:
+  variables:
+    CORENAME: lindbergh
+
+include:
+  # Linux
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/linux-x64.yml'
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/linux-aarch64.yml'
+
+  # Windows
+  - project: 'libretro-infrastructure/ci-templates'
+    file: '/windows-x64-mingw.yml'
+
+stages:
+  - build-prepare
+  - build-shared
+
+# A runner having a bad minute should not redden the pipeline; anything really
+# broken still fails three times over.
+default:
+  retry: 2
+
+##############################################################################
+#################################### STAGES ##################################
+##############################################################################
+
+# The loader for both Linux cores (x86: aarch64 runs it through box64)
+libretro-build-loader-x86:
+  stage: build-prepare
+  image: ubuntu:22.04
+  timeout: 1h
+  script:
+    - bash .ci/libretro-loader.sh
+  artifacts:
+    paths:
+      - loader-x86.tar.gz
+    expire_in: 1 hour
+
+# Defining before_script replaces the template's instead of adding to it, so
+# its NUMPROC is set again here.
+.core-defs-linux:
+  extends: .core-defs
+  timeout: 1h
+  needs:
+    - libretro-build-loader-x86
+  dependencies:
+    - libretro-build-loader-x86
+  before_script:
+    - export NUMPROC=$(($(nproc)/5))
+  script:
+    - bash .ci/libretro-linux.sh
+  # the template's own step would strip or move a core the script already has
+  after_script: []
+
+# Linux 64-bit
+libretro-build-linux-x64:
+  extends:
+    - .libretro-linux-x64
+    - .core-defs-linux
+  image: ubuntu:22.04
+
+# Linux 64-bit (ARM)
+libretro-build-linux-aarch64:
+  extends:
+    - .libretro-linux-aarch64
+    - .core-defs-linux
+  image: ubuntu:24.04
+
+# Windows 64-bit: the loader with Ubuntu's 32-bit MinGW (its libgcc DLL by
+# that path), which the MXE image lacks
+libretro-build-windows-x64:
+  extends:
+    - .libretro-windows-x64-mingw
+    - .core-defs
+  image: ubuntu:24.04
+  timeout: 1h
+  before_script:
+    - export NUMPROC=$(($(nproc)/5))
+  script:
+    - bash .ci/libretro-windows.sh
+  after_script: []
