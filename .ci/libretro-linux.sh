@@ -8,7 +8,7 @@ export DEBIAN_FRONTEND=noninteractive
 # the template's share of the runner, at least one job
 J=$(( ${NUMPROC:-0} > 0 ? NUMPROC : 1 ))
 apt-get -o Acquire::Retries=3 update
-apt-get -o Acquire::Retries=3 -y install --no-install-recommends gcc make zip git ca-certificates
+apt-get -o Acquire::Retries=3 -y install --no-install-recommends gcc libc6-dev make zip git ca-certificates
 # the checkout may belong to another user than the job's
 git config --global --add safe.directory "$PWD"
 mkdir -p dist/system/lindbergh
