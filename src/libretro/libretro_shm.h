@@ -22,10 +22,10 @@
 #include <stdint.h>
 
 #define LR_SHM_MAGIC 0x4C424C52u /* "RLBL" */
-#define LR_SHM_VERSION 1
+#define LR_SHM_VERSION 2
 
-#define LR_MAX_WIDTH 2048
-#define LR_MAX_HEIGHT 1536
+#define LR_MAX_WIDTH 5120
+#define LR_MAX_HEIGHT 2880
 
 /* A ring of interleaved stereo int16 frames at audio_rate */
 #define LR_AUDIO_FRAMES 16384

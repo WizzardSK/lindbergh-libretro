@@ -305,6 +305,24 @@ int initSdlInput(const char *controlsPath)
     {
         bool deviceIsClaimed[MAX_JOYSTICKS] = {false};
         SDL_JoystickID instanceId;
+        // For the libretro core, the players are the core's virtual pads,
+        // "RetroArch Player N", and nothing else: SDL sees the machine's
+        // own controllers too, and gave them P1 and P2 ahead of the core's,
+        // bypassing RetroArch's mapping (NNshi, Windows)
+        if (libretroMode())
+        {
+            for (int i = 0; i < numJoysticks && i < MAX_JOYSTICKS; i++)
+            {
+                const char *name = SDL_GetJoystickNameForID(joystics[i]);
+                int player = 0;
+                if (name && sscanf(name, "RetroArch Player %d", &player) == 1 && player >= 1 && player <= MAX_PLAYERS)
+                {
+                    playerToDeviceIndex[player] = joystics[i];
+                    printf("  - P%d is the core's pad, device %d.\n", player, i);
+                }
+                deviceIsClaimed[i] = true;
+            }
+        }
         // First Pass: Match saved GUIDs to available hardware
         printf("Attempting to map controllers by saved GUIDs...\n");
         for (int player = 1; player <= MAX_PLAYERS; player++)
@@ -672,6 +690,17 @@ void initActionProperties()
     gActionProperties[PLAYER_1][LA_Flying_X].isCentering = true;
     gActionProperties[PLAYER_1][LA_Flying_Y].isCentering = true;
     gActionProperties[PLAYER_1][LA_Throttle].isCentering = true;
+
+    // For the libretro core, sticks get no dead zone of their own:
+    // RetroArch applies its analog dead zone already, and the loader's
+    // 8000 on top of it jumped from the centre to a quarter turn, which
+    // steered as a dead zone and then too sharply (NNshi, OutRun 2 SP).
+    // controls.ini still sets one.
+    if (libretroMode())
+        for (int p = 0; p < MAX_ENTITIES; p++)
+            for (int i = 0; i < NUM_LOGICAL_ACTIONS; i++)
+                if (gActionProperties[p][i].isCentering)
+                    gActionProperties[p][i].deadzone = 0;
 }
 
 /**

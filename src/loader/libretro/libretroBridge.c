@@ -187,7 +187,15 @@ void libretroPollInput()
         }
         lastButtons[i] = pad.buttons;
         for (int a = 0; a < LR_AXES; a++)
-            SDL_SetJoystickVirtualAxis(pads[i], a, pad.axes[a]);
+        {
+            /* A trigger is a joystick axis from -32768 at rest to 32767
+             * held, as SDL's drivers report a pad's; the core's 0..32767
+             * read as half held at rest (NNshi: no gas or brake) */
+            int v = pad.axes[a];
+            if (a == LR_AXIS_LT || a == LR_AXIS_RT)
+                v = v * 2 - 32768;
+            SDL_SetJoystickVirtualAxis(pads[i], a, (Sint16)(v > 32767 ? 32767 : v));
+        }
     }
 
     int w = 0, h = 0;

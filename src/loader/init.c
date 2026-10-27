@@ -50,6 +50,15 @@ void initMain(char *configPath, char *controlsPath)
 
     initConfig(configPath);
 
+    /* the libretro core's Resolution option, over linuxloader.ini's */
+    const char *resolution = getenv("LINDBERGH_LIBRETRO_RESOLUTION");
+    int resolutionW, resolutionH;
+    if (resolution && sscanf(resolution, "%dx%d", &resolutionW, &resolutionH) == 2 && resolutionW > 0 && resolutionH > 0)
+    {
+        getConfig()->width = resolutionW;
+        getConfig()->height = resolutionH;
+    }
+
     gId = getConfig()->crc32;
     gGrp = getConfig()->gameGroup;
     gWidth = getConfig()->width;

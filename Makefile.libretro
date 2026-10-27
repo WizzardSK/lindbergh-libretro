@@ -1,6 +1,8 @@
 # The libretro core (64-bit, for the frontend); the loader it runs is the
 # 32-bit build of the main Makefile. platform=win64 builds the Windows DLL
-# with the mingw-w64 cross compiler.
+# with the mingw-w64 cross compiler. SYSTEM_ZIP=<zip> puts the loader's
+# system/lindbergh in the core, which writes it out at load (BUILD_STAMP
+# names that build, as the zip's build file does).
 CC ?= gcc
 CFLAGS ?= -O2
 CFLAGS += -fPIC -Wall -Wextra -Wno-unused-parameter -std=gnu11
@@ -16,9 +18,16 @@ LDFLAGS += -shared -Wl,--no-undefined -Wl,--version-script=src/libretro/link.T
 LIBS = -lrt
 endif
 
-$(TARGET): src/libretro/lindbergh_libretro.c src/libretro/libretro_shm.h src/libretro/libretro_ipc.h
+SOURCES = src/libretro/lindbergh_libretro.c
+ifneq ($(SYSTEM_ZIP),)
+SOURCES += src/libretro/miniz/miniz.c src/libretro/embed.S
+CFLAGS += -DLR_EMBEDDED_SYSTEM -DLR_BUILD_STAMP='"$(BUILD_STAMP)"' -DLR_SYSTEM_ZIP='"$(abspath $(SYSTEM_ZIP))"'
+CFLAGS += -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
+endif
+
+$(TARGET): $(SOURCES) src/libretro/libretro_shm.h src/libretro/libretro_ipc.h $(SYSTEM_ZIP)
 	mkdir -p build
-	$(CC) $(CFLAGS) src/libretro/lindbergh_libretro.c -o $@ $(LDFLAGS) $(LIBS)
+	$(CC) $(CFLAGS) $(SOURCES) -o $@ $(LDFLAGS) $(LIBS)
 
 clean:
 	rm -f $(TARGET)

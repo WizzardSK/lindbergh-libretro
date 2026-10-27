@@ -37,6 +37,11 @@
 #include "libretro.h"
 #include "libretro_ipc.h"
 #include "libretro_shm.h"
+#ifdef LR_EMBEDDED_SYSTEM
+#include "miniz/miniz.h"
+extern const unsigned char lr_system_zip[];
+extern const unsigned char lr_system_zip_end[];
+#endif
 
 static retro_environment_t environ_cb;
 static retro_video_refresh_t video_cb;
@@ -46,6 +51,12 @@ static retro_input_state_t input_state_cb;
 static retro_log_printf_t log_cb;
 
 static LrShm *shm;
+/* The shared memory as the audio callback sees it, on RetroArch's audio
+ * thread: taken away (audio_release_shm) before it is unmapped */
+static LrShm *audio_shm;
+static int audio_busy;
+/* Whether RetroArch calls the audio callback (SET_AUDIO_CALLBACK) */
+static bool audio_async;
 static char shm_name[64];
 static LrEvent run_event, frame_event;
 #ifdef _WIN32
@@ -57,7 +68,13 @@ static pid_t loader;
 static uint32_t last_frame;
 static unsigned frame_w = 640, frame_h = 480;
 static bool test_mode;
+/* The Audio Thread option: audio on RetroArch's audio thread */
+static bool audio_thread;
+/* The game of the content and where the loader runs it from */
+static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
 static bool pointer_lightgun = true;
+/* WIDTHxHEIGHT for the loader, or "native" for linuxloader.ini's */
+static char resolution[16] = "native";
 static int16_t *audio_out;
 static double sample_rate = 48000.0;
 
@@ -85,7 +102,9 @@ static const char *get_option(const char *key, const char *fallback)
 static void read_options(void)
 {
     test_mode = !strcmp(get_option("lindbergh_test_mode", "disabled"), "enabled");
+    audio_thread = !strcmp(get_option("lindbergh_audio_thread", "disabled"), "enabled");
     pointer_lightgun = !strcmp(get_option("lindbergh_pointer", "lightgun"), "lightgun");
+    snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
 }
 
 void retro_set_environment(retro_environment_t cb)
@@ -93,7 +112,9 @@ void retro_set_environment(retro_environment_t cb)
     environ_cb = cb;
     static const struct retro_variable vars[] = {
         {"lindbergh_test_mode", "Test Mode (Restart); disabled|enabled"},
+        {"lindbergh_resolution", "Resolution (Restart); native|1280x720|1920x1080|2560x1440|3840x2160|5120x2880"},
         {"lindbergh_pointer", "Pointer; lightgun|mouse"},
+        {"lindbergh_audio_thread", "Audio Thread (Restart); disabled|enabled"},
         {NULL, NULL},
     };
     cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
@@ -205,8 +226,13 @@ static bool game_path(const char *content, char *out, size_t size)
     return true;
 }
 
+static void audio_release_shm(void);
+static void audio_callback(void);
+static void audio_set_state(bool enabled);
+
 static void close_shm(void)
 {
+    audio_release_shm();
 #ifdef _WIN32
     if (shm)
         UnmapViewOfFile(shm);
@@ -278,6 +304,7 @@ static bool create_shm(void)
     }
 #endif
     memset(shm, 0, sizeof(LrShm) - sizeof(shm->pixels));
+    __atomic_store_n(&audio_shm, shm, __ATOMIC_RELEASE);
     shm->magic = LR_SHM_MAGIC;
     shm->version = LR_SHM_VERSION;
     return true;
@@ -391,35 +418,116 @@ static void keyboard_event(bool down, unsigned keycode, uint32_t character, uint
     __atomic_store_n(&shm->key_head, head + 1, __ATOMIC_RELEASE);
 }
 
-bool retro_load_game(const struct retro_game_info *game)
+#ifdef LR_EMBEDDED_SYSTEM
+/* Every directory of a path down to its last separator */
+static void make_dirs(char *path)
 {
-    if (!game || !game->path)
-        return false;
-    read_options();
-
-    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
-    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
-        return false;
-    struct retro_keyboard_callback keyboard = {keyboard_event};
-    environ_cb(RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, &keyboard);
-
-    const char *system = NULL;
-    environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
-    char root[PATH_MAX];
-    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
-
-    char elf[PATH_MAX];
-    if (!game_path(game->path, elf, sizeof(elf)) || access(elf, R_OK) != 0)
+    for (char *p = path + 1; *p; p++)
     {
-        lr_log(RETRO_LOG_ERROR, "cannot read the game %s\n", game->path);
+        if (*p != '/' && *p != '\\')
+            continue;
+        char c = *p;
+        *p = 0;
+#ifdef _WIN32
+        CreateDirectoryA(path, NULL);
+#else
+        mkdir(path, 0755);
+#endif
+        *p = c;
+    }
+}
+#endif
+
+/* The loader this core carries (the build's system/lindbergh, as a zip)
+ * written to root when what is there is from another build or missing, as
+ * its build file says: one file to install, the core (NNshi). Without one
+ * carried, root holds the loader as it was put there. */
+static bool install_loader(const char *root)
+{
+#ifndef LR_EMBEDDED_SYSTEM
+    (void)root;
+    return true;
+#else
+    char stamp_path[PATH_MAX], have[64] = "";
+    snprintf(stamp_path, sizeof(stamp_path), "%s/build", root);
+    FILE *f = fopen(stamp_path, "rb");
+    if (f)
+    {
+        if (!fgets(have, sizeof(have), f))
+            have[0] = 0;
+        fclose(f);
+        have[strcspn(have, "\r\n")] = 0;
+    }
+    if (!strcmp(have, LR_BUILD_STAMP))
+        return true;
+
+    lr_log(RETRO_LOG_INFO, "writing the loader of build %s to %s (there: %s)\n", LR_BUILD_STAMP, root,
+           have[0] ? have : "none");
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_mem(&zip, lr_system_zip, (size_t)(lr_system_zip_end - lr_system_zip), 0))
+    {
+        lr_log(RETRO_LOG_ERROR, "the loader the core carries cannot be read\n");
         return false;
     }
-    char dir[PATH_MAX];
-    snprintf(dir, sizeof(dir), "%s", elf);
-    char *slash = last_separator(dir);
-    if (slash)
-        *slash = 0;
+    bool ok = true;
+    const mz_uint count = mz_zip_reader_get_num_files(&zip);
+    for (mz_uint i = 0; i < count && ok; i++)
+    {
+        mz_zip_archive_file_stat st;
+        if (!mz_zip_reader_file_stat(&zip, i, &st))
+        {
+            ok = false;
+            break;
+        }
+        char path[PATH_MAX * 2];
+        snprintf(path, sizeof(path), "%s/%s", root, st.m_filename);
+        if (!strcmp(st.m_filename, "build"))
+            continue; /* written last, once all the rest is there */
+        make_dirs(path);
+        if (st.m_is_directory)
+            continue;
+#ifndef _WIN32
+        const mode_t mode = (mode_t)(st.m_external_attr >> 16);
+        if (S_ISLNK(mode))
+        {
+            char target[PATH_MAX];
+            const size_t n = (size_t)st.m_uncomp_size < sizeof(target) - 1 ? (size_t)st.m_uncomp_size : sizeof(target) - 1;
+            ok = mz_zip_reader_extract_to_mem(&zip, i, target, n, 0);
+            target[n] = 0;
+            unlink(path);
+            ok = ok && symlink(target, path) == 0;
+            continue;
+        }
+        unlink(path);
+#else
+        DeleteFileA(path);
+#endif
+        ok = mz_zip_reader_extract_to_file(&zip, i, path, 0);
+#ifndef _WIN32
+        if (ok && (mode & 0777))
+            chmod(path, mode & 0777);
+#endif
+        if (!ok)
+            lr_log(RETRO_LOG_ERROR, "cannot write %s\n", path);
+    }
+    mz_zip_reader_end(&zip);
+    if (!ok)
+        return false;
+    f = fopen(stamp_path, "wb");
+    if (f)
+    {
+        fprintf(f, "%s\n", LR_BUILD_STAMP);
+        fclose(f);
+    }
+    return true;
+#endif
+}
 
+/* The loader started on the game of the content */
+static bool start_loader(void)
+{
+    const char *elf = s_elf, *dir = s_dir, *root = s_root;
 #ifdef _WIN32
     char exe[PATH_MAX];
     snprintf(exe, sizeof(exe), "%s\\linuxloader.exe", root);
@@ -456,11 +564,14 @@ bool retro_load_game(const struct retro_game_info *game)
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", shm_name);
     /* the mix goes to the core (libretroBridge.c), not to a sound card */
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", "dummy");
+    /* the Resolution option, over linuxloader.ini's (init.c) */
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", strcmp(resolution, "native") ? resolution : NULL);
     BOOL started = CreateProcessA(exe, cmdline, NULL, NULL, log_file != INVALID_HANDLE_VALUE,
                                   CREATE_NO_WINDOW, NULL, dir, &si, &pi);
     DWORD error = GetLastError();
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", NULL);
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
+    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", NULL);
     if (log_file != INVALID_HANDLE_VALUE)
         CloseHandle(log_file);
     if (!started)
@@ -511,6 +622,9 @@ bool retro_load_game(const struct retro_game_info *game)
         setenv("LINDBERGH_LIBRETRO_SHM", shm_name, 1);
         /* the mix goes to the core (libretroBridge.c), not to a sound card */
         setenv("SDL_AUDIO_DRIVER", "dummy", 1);
+        /* the Resolution option, over linuxloader.ini's (init.c) */
+        if (strcmp(resolution, "native"))
+            setenv("LINDBERGH_LIBRETRO_RESOLUTION", resolution, 1);
 #if defined(__aarch64__)
         /* what AppRun sets, for the x86 libraries box64 loads */
         char libs[PATH_MAX * 2];
@@ -541,6 +655,50 @@ bool retro_load_game(const struct retro_game_info *game)
     lr_log(RETRO_LOG_INFO, "started %s %s (pid %d)\n", apprun, elf, (int)loader);
     return true;
 #endif
+}
+
+bool retro_load_game(const struct retro_game_info *game)
+{
+    if (!game || !game->path)
+        return false;
+    read_options();
+
+    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
+    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
+        return false;
+    struct retro_keyboard_callback keyboard = {keyboard_event};
+    environ_cb(RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK, &keyboard);
+    struct retro_audio_callback audio = {audio_callback, audio_set_state};
+    audio_async = audio_thread && environ_cb(RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK, &audio);
+    lr_log(RETRO_LOG_INFO, "audio: %s\n", audio_async ? "on RetroArch's audio thread" : "a frame's worth each run");
+
+    const char *system = NULL;
+    environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
+    char root[PATH_MAX];
+    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
+    if (!install_loader(root))
+    {
+        struct retro_message msg = {"Lindbergh: the loader could not be written to system/lindbergh (see the log)", 600};
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        return false;
+    }
+
+    char elf[PATH_MAX];
+    if (!game_path(game->path, elf, sizeof(elf)) || access(elf, R_OK) != 0)
+    {
+        lr_log(RETRO_LOG_ERROR, "cannot read the game %s\n", game->path);
+        return false;
+    }
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", elf);
+    char *slash = last_separator(dir);
+    if (slash)
+        *slash = 0;
+
+snprintf(s_elf, sizeof(s_elf), "%s", elf);
+    snprintf(s_dir, sizeof(s_dir), "%s", dir);
+    snprintf(s_root, sizeof(s_root), "%s", root);
+    return start_loader();
 }
 
 bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t num)
@@ -628,6 +786,84 @@ static void write_input(void)
  * always there at a run's end */
 #define AUDIO_CUSHION_FRAMES 2048
 
+/* The rate SDL's device mixes at, once the loader has seen it */
+static void check_audio_rate(void)
+{
+    if (shm->audio_rate && shm->audio_rate != (uint32_t)sample_rate)
+    {
+        sample_rate = shm->audio_rate;
+        struct retro_system_av_info av;
+        retro_get_system_av_info(&av);
+        environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av);
+        lr_log(RETRO_LOG_INFO, "audio at %u Hz\n", shm->audio_rate);
+    }
+}
+
+#define AUDIO_CALLBACK_FRAMES 1024
+static int16_t audio_cb_out[AUDIO_CALLBACK_FRAMES * 2];
+
+/* RetroArch's audio thread asks for audio (SET_AUDIO_CALLBACK): what the
+ * loader has mixed goes as it arrives, so the sound follows the loader's
+ * clock, as SDL's own thread has it in the loader alone, and not the
+ * frames, which come slower where a game drops frames (NNshi, Initial D 4's
+ * car select at 40 fps) */
+static void audio_callback(void)
+{
+    __atomic_add_fetch(&audio_busy, 1, __ATOMIC_ACQUIRE);
+    LrShm *s = __atomic_load_n(&audio_shm, __ATOMIC_ACQUIRE);
+    uint32_t take = 0;
+    if (s)
+    {
+        uint32_t write = s->audio_write, read = s->audio_read;
+        uint32_t avail = write - read;
+        /* a backlog (the frontend's device held back) is cut back rather
+         * than played late */
+        if (avail > 3 * AUDIO_CUSHION_FRAMES)
+        {
+            read = write - AUDIO_CUSHION_FRAMES;
+            avail = AUDIO_CUSHION_FRAMES;
+        }
+        take = avail < AUDIO_CALLBACK_FRAMES ? avail : AUDIO_CALLBACK_FRAMES;
+        for (uint32_t i = 0; i < take; i++)
+        {
+            const int16_t *in = &s->audio[((read + i) % LR_AUDIO_FRAMES) * 2];
+            audio_cb_out[i * 2] = in[0];
+            audio_cb_out[i * 2 + 1] = in[1];
+        }
+        s->audio_read = read + take;
+    }
+    __atomic_sub_fetch(&audio_busy, 1, __ATOMIC_RELEASE);
+    if (take && audio_batch_cb)
+        audio_batch_cb(audio_cb_out, take);
+    else
+    {
+        /* nothing mixed yet: RetroArch calls again at once */
+#ifdef _WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+}
+
+static void audio_set_state(bool enabled)
+{
+    (void)enabled;
+}
+
+static void audio_release_shm(void)
+{
+    __atomic_store_n(&audio_shm, NULL, __ATOMIC_RELEASE);
+    while (__atomic_load_n(&audio_busy, __ATOMIC_ACQUIRE))
+    {
+#ifdef _WIN32
+        Sleep(0);
+#else
+        usleep(100);
+#endif
+    }
+}
+
 /* Exactly one frame's worth of audio a run, at the rate SDL mixes at: out
  * of the ring once it holds the cushion, silence while it fills (again).
  * Handing over what happened to be there gave RetroArch nothing on one run
@@ -637,15 +873,6 @@ static void send_audio(void)
     static double owed;
     static bool primed;
 
-    /* the rate SDL's device mixes at, once the loader has seen it */
-    if (shm->audio_rate && shm->audio_rate != (uint32_t)sample_rate)
-    {
-        sample_rate = shm->audio_rate;
-        struct retro_system_av_info av;
-        retro_get_system_av_info(&av);
-        environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av);
-        lr_log(RETRO_LOG_INFO, "audio at %u Hz\n", shm->audio_rate);
-    }
     owed += sample_rate / 60.0;
     uint32_t frames = (uint32_t)owed;
     owed -= frames;
@@ -716,7 +943,9 @@ void retro_run(void)
     }
     else
         video_cb(NULL, frame_w, frame_h, 0);
-    send_audio();
+    check_audio_rate();
+    if (!audio_async)
+        send_audio();
 }
 
 size_t retro_serialize_size(void) { return 0; }

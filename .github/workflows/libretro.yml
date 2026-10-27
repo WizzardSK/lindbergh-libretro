@@ -42,18 +42,26 @@ jobs:
           make linux
           scripts/appimage/make-appimage.sh
 
+      # The core carries the loader's system/lindbergh as a zip and writes
+      # it out at load; the archive still has it beside the core too
+      - name: System zip
+        shell: bash
+        run: |
+          mkdir -p dist/system/lindbergh
+          cp -a build-linux/linuxloader.AppDir/. dist/system/lindbergh/
+          git rev-parse --short HEAD > dist/system/lindbergh/build
+          (cd dist/system/lindbergh && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
+
       - name: Core
-        run: CC=gcc make -f Makefile.libretro
+        run: CC=gcc make -f Makefile.libretro SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
 
       - name: Package
         shell: bash
         run: |
-          mkdir -p dist/cores dist/info dist/system/lindbergh
+          mkdir -p dist/cores dist/info
           cp build/lindbergh_libretro.so dist/cores/
           strip dist/cores/lindbergh_libretro.so
           cp lindbergh_libretro.info dist/info/
-          cp -a build-linux/linuxloader.AppDir/. dist/system/lindbergh/
-          git rev-parse --short HEAD > dist/system/lindbergh/build
           tar -czf lindbergh_libretro-linux-x86_64.tar.gz -C dist .
 
       - uses: actions/upload-artifact@v4
@@ -75,22 +83,28 @@ jobs:
       - name: Loader
         shell: bash
         run: scripts/windows/windows-build.sh
+      - name: System zip
+        shell: bash
+        run: |
+          mkdir -p dist/system/lindbergh
+          cp -a win-release/. dist/system/lindbergh/
+          git rev-parse --short HEAD > dist/system/lindbergh/build
+          (cd dist/system/lindbergh && zip -q -r -9 "$GITHUB_WORKSPACE/system.zip" .)
       - name: Core
-        run: make -f Makefile.libretro platform=win64
+        run: make -f Makefile.libretro platform=win64 SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
       - name: Package
         shell: bash
         run: |
-          mkdir -p dist/cores dist/info dist/system/lindbergh
-          cp build/lindbergh_libretro.dll dist/cores/
-          x86_64-w64-mingw32-strip dist/cores/lindbergh_libretro.dll
-          cp lindbergh_libretro.info dist/info/
-          cp -a win-release/. dist/system/lindbergh/
-          git rev-parse --short HEAD > dist/system/lindbergh/build
-          (cd dist && zip -r ../lindbergh_libretro-windows-x86_64.zip .)
+          # the core and its info as they are: the artifact is the one zip,
+          # and the core carries the loader (NNshi)
+          mkdir -p pkg/cores pkg/info
+          cp build/lindbergh_libretro.dll pkg/cores/
+          x86_64-w64-mingw32-strip pkg/cores/lindbergh_libretro.dll
+          cp lindbergh_libretro.info pkg/info/
       - uses: actions/upload-artifact@v4
         with:
           name: lindbergh_libretro-windows-x86_64
-          path: lindbergh_libretro-windows-x86_64.zip
+          path: pkg/
 
   # box64 with BOX32, which runs 32-bit x86 programs on 64-bit ARM: the
   # loader and the game on aarch64
@@ -133,20 +147,26 @@ jobs:
         with:
           name: box64-box32
           path: box64-out
-      - name: Core
-        run: CC=gcc make -f Makefile.libretro
-      - name: Package
+      - name: System zip
         shell: bash
         run: |
           # the x86 loader's AppDir, with box64 beside it
           mkdir x86 && tar -xzf lindbergh_libretro-linux-x86_64.tar.gz -C x86
+          mkdir -p dist
+          cp -a x86/system dist/
+          install -m 755 box64-out/box64 dist/system/lindbergh/box64
+          cp box64-out/box64.version dist/system/lindbergh/
+          git rev-parse --short HEAD > dist/system/lindbergh/build
+          (cd dist/system/lindbergh && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
+      - name: Core
+        run: CC=gcc make -f Makefile.libretro SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
+      - name: Package
+        shell: bash
+        run: |
           mkdir -p dist/cores dist/info
           cp build/lindbergh_libretro.so dist/cores/
           strip dist/cores/lindbergh_libretro.so
           cp lindbergh_libretro.info dist/info/
-          cp -a x86/system dist/
-          install -m 755 box64-out/box64 dist/system/lindbergh/box64
-          cp box64-out/box64.version dist/system/lindbergh/
           tar -czf lindbergh_libretro-linux-aarch64.tar.gz -C dist .
       - uses: actions/upload-artifact@v4
         with:

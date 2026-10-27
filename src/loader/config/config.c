@@ -515,7 +515,9 @@ int initConfig(const char *configFilePath)
 
     config.inputMode = 0;
 
-    char filePath[PATH_MAX];
+    // Empty when there is no file at all, as on Windows without a
+    // linuxloader.ini: it was read uninitialised and logged as a garbled name
+    char filePath[PATH_MAX] = "";
     if (configFilePath != NULL && configFilePath[0] != '\0')
     {
         strncpy(filePath, configFilePath, PATH_MAX - 1);
@@ -535,6 +537,11 @@ int initConfig(const char *configFilePath)
 #endif
     }
     filePath[PATH_MAX - 1] = '\0';
+    if (filePath[0] == '\0')
+    {
+        log_info("No linuxloader.ini, using default values.");
+        return 1;
+    }
     IniConfig *ini = iniLoad(filePath);
 
     if (ini == NULL)
