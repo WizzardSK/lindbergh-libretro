@@ -10,6 +10,17 @@ The core is the one file to install: `lindbergh_libretro.so` (Linux) or `lindber
 
 Content is the game's ELF from its dump (for example `disk0/elf/` or the game's program folder), or a `.lindbergh` text file holding the ELF's path, absolute or relative to the text file. The game's folders stay as the dump has them: a game opens its data relative to its program's folder (House of the Dead 4 expects `../fs/`). The game's `linuxloader.ini` and `controls.ini` in its folder work as they do standalone (`linuxloader --create config` writes a default one); the loader keeps a game's settings in `eeprom.bin` and `sram.bin` there too. Which games run, and which ELF each one starts from, is in the loader's [Linux](docs/guide-linux.md) and [Windows](docs/guide-windows.md) guides.
 
+### Game folders
+
+Some dumps need their folders moved before the game runs; the log does not say so (NNshi):
+
+| Game | What it takes |
+|---|---|
+| After Burner Climax | The `abc` and `game` folders under `disk1` instead of `disk0`. On a cabinet set to Deluxe, motion off in the test mode. |
+| The House of the Dead 4 | The `hod4data` folder renamed to `fs`. |
+
+On Windows with an NVIDIA GPU, a program profile in the NVIDIA Control Panel for `system/lindbergh/linuxloader.exe` with Anisotropic Filtering at 16x sharpens the games' textures; forcing MSAA or MFAA there changes nothing (NNshi).
+
 ## Core options
 
 Grouped into Video, Input, Audio and System, each with a tooltip; Steering Inner Zone and Steering Effect show only with Steering Response on logarithmic.
