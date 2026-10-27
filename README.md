@@ -1,86 +1,45 @@
 # Lindbergh libretro core
 
-This fork adds a libretro core: `lindbergh_libretro.so` runs a Lindbergh game in RetroArch. The games are 32-bit Linux programs, so the core runs the game with the loader as a process of its own and exchanges the frames, audio and input with it through shared memory (`src/libretro/`, the loader's side in `src/loader/libretro/libretroBridge.c`): the game draws one frame per RetroArch frame, its window stays hidden, RetroArch's pads become SDL gamepads (so `controls.ini` works as standalone) and its light gun or mouse the pointer.
+A libretro core for Sega Lindbergh games, built on [Linux Loader](https://github.com/lindbergh-loader/linuxloader) (formerly Lindbergh Loader). It runs the games in RetroArch on Linux x86-64, Linux aarch64 and Windows x86-64.
 
-- The core goes in RetroArch's `cores/`; it carries the loader (the AppDir on Linux, `linuxloader.exe` and `ll-deps/` on Windows, box64 too on aarch64) and writes it to RetroArch's `system/lindbergh/` at load whenever what is there is from another build or missing (its `build` file names the build). The Windows archive is the core and its `.info`; the Linux ones still have `cores/`, `info/` and the same `system/lindbergh/` beside the core.
-- Controls without a `controls.ini`: the loader's defaults, with RetroArch's keyboard as the keyboard (5 and 6 coin, 1 and 2 start, T test, S service, the arrows) and on the pads Start, Select as coin, L3 service and R3 test. The players are RetroArch's ports 1 and 2 only, the machine's own controllers are left to RetroArch. Sticks have no dead zone of the loader's own, RetroArch's analog dead zone applies (a `controls.ini` can still set one).
-- Content is the game's ELF (in `disk0/elf/`), or a `.lindbergh` text file holding its path. The game's `linuxloader.ini` and `controls.ini` work as they do standalone (`linuxloader --create config` writes a default one). The Resolution core option (720p to 5K, or the ini's) sets the loader's width and height, at which the games it can patch render; every frame goes through system memory to RetroArch, so the highest ones cost speed. The Audio Thread option (off by default) hands the sound to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames.
-- Linux x86-64, and Linux aarch64 through box64 (built with BOX32, in `system/lindbergh/`), which runs the 32-bit x86 loader and game.
-- Windows x86-64: `system/lindbergh/` holds the loader's Windows build (`linuxloader.exe` and `ll-deps/`), which loads the game's ELF itself; its console output goes to `system/lindbergh/loader.log`.
-- Built by `.github/workflows/libretro.yml` (branch `libretro`).
+## Installing
 
-<p align="center">
-  <img src="src/loader/resources/logo.png" alt="Linux Loader Logo">
-</p>
+The core is the one file to install: `lindbergh_libretro.so` (Linux) or `lindbergh_libretro.dll` (Windows) goes in RetroArch's `cores/`, its `.info` in `info/`. The core carries the loader and writes it to RetroArch's `system/lindbergh/` at load, when that folder is missing or holds another build's (its `build` file names the build), so the first load after an update takes a moment longer.
 
-# Linux Loader
+## Content
 
-This project is an evolved version of Lindbergh Loader. The main goal is to run all the SEGA Lindbergh games in Linux and Windows plus, in the future, other Arcade systems such as Namco N2 / ES1 and Raw Thrills.
+Content is the game's ELF from its dump (for example `disk0/elf/` or the game's program folder), or a `.lindbergh` text file holding the ELF's path, absolute or relative to the text file. The game's folders stay as the dump has them: a game opens its data relative to its program's folder (House of the Dead 4 expects `../fs/`). The game's `linuxloader.ini` and `controls.ini` in its folder work as they do standalone (`linuxloader --create config` writes a default one); the loader keeps a game's settings in `eeprom.bin` and `sram.bin` there too. Which games run, and which ELF each one starts from, is in the loader's [Linux](docs/guide-linux.md) and [Windows](docs/guide-windows.md) guides.
 
-## 📚 Documentation
+## Core options
 
-For detailed information on configuration and controls, please see the following guides:
+| Option | Values | Takes effect |
+|---|---|---|
+| Test Mode | disabled, enabled: the game started in test mode, as the loader's `-t` does | at the next start of the content |
+| Resolution | native (the `linuxloader.ini`'s), 1280x720, 1920x1080, 2560x1440, 3840x2160, 5120x2880: the size the games the loader can patch render at; every frame goes through system memory to RetroArch, so the highest ones cost speed | at the next start of the content |
+| Pointer | lightgun, mouse: what aims in the gun games, RetroArch's light gun (trigger, reload and aux A as the buttons) or its pointer (the mouse's absolute position, or touch); the mouse's buttons fire with either | on the fly |
+| Audio Thread | disabled, enabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; off by default, as it loses OutRun 2 SP's announcer | at the next start of the content |
 
-- [**🚀 Linux Guide**](docs/guide-linux.md): Information on supported games, known issues, and general configuration for Linux.
-- [**🎮 Windows Guide**](docs/guide-windows.md): Information on supported games, known issues, and general configuration for Windows.
-- [**🎮 Controls Guide**](docs/Controls-Guide.md): A detailed guide on how to customize your controls using the `controls.ini` file.
+## Controls
 
-If you'd like to support the development work of this loader, see early development builds or get support from the authors please consider [becoming a patreon here](https://www.patreon.com/c/LinuxLoader).
+Without a `controls.ini`, the loader's defaults:
 
-If you need any help please ask the community in the [arcade community discord](https://arcade.community). Please only submit issues if they are bugs with the software, ask in the arcade community discord if you're not sure if it's a bug or you're not setting something up properly!
+- Pads: RetroArch's ports 1 and 2 are players 1 and 2; Start is start, Select a coin, L3 service and R3 test. The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
+- Keyboard: RetroArch's keyboard is the game's: 5 and 6 coin, 1 and 2 start, T test, S service, the arrows.
+- Light gun or mouse: the pointer, as the Pointer option says.
 
-## Building & Running
+A `controls.ini` maps them as standalone, since RetroArch's pads reach the game as SDL gamepads; see the [Controls Guide](docs/Controls-Guide.md).
 
-### Linux
+## How it works
 
-In order to build the loader in Linux you will need to run the following commands. We recommend Ubuntu 22.04 LTS, but it will run in almost any modern distro using the AppImage.  
-Please note other dependencies might be required to run games (see the [guide](docs/guide-linux.md)).
+The games are 32-bit Linux programs, so the core does not run them itself: it starts the loader as a process of its own and exchanges the frames, the audio and the input with it through shared memory (`src/libretro/`, the loader's side in `src/loader/libretro/libretroBridge.c`). The game draws one frame per RetroArch frame and its window stays hidden. On Linux aarch64 the loader and the game run through box64 (built with BOX32, for 32-bit x86), which comes with the core. On Windows the loader's own Windows build (`linuxloader.exe` and `ll-deps/`) loads the game's ELF; its console output goes to `system/lindbergh/loader.log`.
 
+## Building
 
-```shell
-git clone git@github.com:lindbergh-loader/linuxloader.git
-cd linuxloader
-./scripts/appimage/install-packages.sh
-./scripts/appimage/build-deps.sh
-make linux
-```
+`.github/workflows/libretro.yml` builds the core for every platform on the `libretro` branch: the loader as the project's own AppImage and Windows builds make it, zipped into the core (`make -f Makefile.libretro SYSTEM_ZIP=... BUILD_STAMP=...`). What changed in the core is in [CHANGELOG.md](CHANGELOG.md).
 
-This loader in Linux will need access to the input devices and serial devices on your computer. You should add your user account to the following groups and then _restart your computer_.
+## The loader
 
-```shell
-sudo usermod -a -G dialout,input $USER
-```
-
-Then you can copy the contents of the build-linux directory to any folder you want and run `./linuxloader -g /path/to/your/game` for the game, or `./linuxloader -g /path/to/your/game -t` for test mode. Please note you might need to set the game executable as "executable" using `chmod +x`.
-Or run `./linuxloader --help` to see the available options.
-
-Example:
-```shell
-cp -a build-linux/* /home/<user>/emulators/linuxloader
-cd /home/<user>/emulators/linuxloader
-./linuxloader -g /path/to/your/game 
-```
-
-### Windows
-
-To build this project in Windows you can use the following script.
-
-```shell
-.\scripts\windows\windows-build.bat
-```
-The script will download Msys, install the required packages and compile the project. After this it will create a .exe file in the build-win32 directory. You can copy this file along with all the required.dll files to any folder you want and run it.
-
-
-If you'd like to change game settings, you can create a file named `linuxloader.ini` in the same directory as the game executable and copy the default configuration file to it. For example:
-
-```shell
-./linuxloader --create config /path/to/your/game-folder
-```
-
-Please take a look at the configuration options, supported games and known issues in the [guide](docs/guide-windows.md).
-
-
-***NOTE*** For configuration files, check the corresponding guide for the operating system you're using: [Linux](docs/guide-linux.md) or [Windows](docs/guide-windows.md).
+This core is a fork of Linux Loader, whose goal is to run all the SEGA Lindbergh games on Linux and Windows and, in the future, other arcade systems such as Namco N2 / ES1 and Raw Thrills. Its standalone builds, documentation and support are upstream: [lindbergh-loader/linuxloader](https://github.com/lindbergh-loader/linuxloader), its [Patreon](https://www.patreon.com/c/LinuxLoader) and the [arcade community discord](https://arcade.community). Questions about the core belong here, not with the loader's authors.
 
 ## License
 
