@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "config/config.h"
@@ -65,6 +66,52 @@ void initMain(char *configPath, char *controlsPath)
     const char *freeplay = getenv("LINDBERGH_LIBRETRO_FREEPLAY");
     if (freeplay && (!strcmp(freeplay, "0") || !strcmp(freeplay, "1")))
         getConfig()->freeplay = freeplay[0] - '0';
+
+    /* the libretro core's Debug options, over linuxloader.ini's */
+    const char *debugIni = getenv("LINDBERGH_LIBRETRO_INI");
+    if (debugIni && *debugIni)
+        applyIniLines(debugIni);
+
+    /* the libretro core's saves/Lindbergh: the game's EEPROM and SRAM there,
+     * named by its DVP, so a game's test program and the game itself
+     * (JenTest and Jennifer, both DVP-0015) share them (NNshi). A path the
+     * linuxloader.ini sets stays; the files in the game's folder are copied
+     * there the first time, so nothing set so far is lost. */
+    const char *saves = getenv("LINDBERGH_LIBRETRO_SAVES");
+    if (saves && *saves && strcmp(getConfig()->gameDVP, "DVP-XXXX") != 0)
+    {
+        char *paths[2] = {getConfig()->eepromPath, getConfig()->sramPath};
+        const char *defaults[2] = {"eeprom.bin", "sram.bin"};
+        const char *kinds[2] = {"eeprom", "sram"};
+        for (int i = 0; i < 2; i++)
+        {
+            if (strcmp(paths[i], defaults[i]) != 0)
+                continue;
+            char target[MAX_PATH_LENGTH];
+            snprintf(target, sizeof(target), "%s/%s.%s.bin", saves, getConfig()->gameDVP, kinds[i]);
+            FILE *have = fopen(target, "rb");
+            if (have)
+                fclose(have);
+            else
+            {
+                FILE *from = fopen(defaults[i], "rb");
+                if (from)
+                {
+                    FILE *to = fopen(target, "wb");
+                    char buf[4096];
+                    size_t n;
+                    while (to && (n = fread(buf, 1, sizeof(buf), from)) > 0)
+                        fwrite(buf, 1, n, to);
+                    if (to)
+                        fclose(to);
+                    fclose(from);
+                    log_info("libretro: %s copied to %s\n", defaults[i], target);
+                }
+            }
+            snprintf(paths[i], MAX_PATH_LENGTH, "%s", target);
+        }
+        log_info("libretro: EEPROM %s, SRAM %s\n", getConfig()->eepromPath, getConfig()->sramPath);
+    }
 
     gId = getConfig()->crc32;
     gGrp = getConfig()->gameGroup;
