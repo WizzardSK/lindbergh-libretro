@@ -19,6 +19,15 @@ struct linux_dirent
     char d_name[260];
 };
 
+struct linux_dirent64
+{
+    uint64_t d_ino;
+    int64_t d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[256];
+};
+
 struct DIR_Impl
 {
     HANDLE hFind;
@@ -176,6 +185,7 @@ namespace FileSystemBridge
     int bridgeChmod(const char *filename, int pmode);
 
     int bridgeCreat(const char *pathname, int mode);
+    int bridgeRmdir(const char *path);
     char *bridgeGetcwd(char *buf, size_t size);
 } // namespace FileSystemBridge
 extern "C"
@@ -187,6 +197,8 @@ extern "C"
 
     void *bridgeOpendir(const char *name);
     struct linux_dirent *bridgeReaddir(void *dirp);
+    int bridgeReaddir_r(void *dirp, struct linux_dirent *entry, struct linux_dirent **result);
+    int bridgeReaddir64_r(void *dirp, struct linux_dirent64 *entry, struct linux_dirent64 **result);
     int bridgeClosedir(void *dirp);
 
     int bridgeUnlink(const char *pathname);

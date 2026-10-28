@@ -28,6 +28,7 @@
 
 #include "glxBridge.h"
 #include "../libretro/libretroBridge.h"
+#include "pbufferEmu.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -40,8 +41,6 @@
 
 extern uint32_t gId;
 extern int gGrp;
-
-SDL_Window *g_pbufWindow = NULL;
 
 #ifdef _WIN32
 // --------------------------------------------------------------------------
@@ -117,6 +116,9 @@ bool bridgeGlxMakeContextCurrent(Display *dpy, GLXDrawable drawable, GLXDrawable
 
     if (drawable == 0)
     { // Unbind context
+        // Let go of the pbuffer while a context is still current, otherwise glXGetCurrentDrawable keeps reporting it after the game unbound.
+        pbufferBindDrawable(0);
+
         if (makeSDLCurrent(NULL, NULL) < 0)
         {
             log_error("glXMakeContextCurrent failed to unbind context: %s\n", SDL_GetError());
@@ -126,6 +128,11 @@ bool bridgeGlxMakeContextCurrent(Display *dpy, GLXDrawable drawable, GLXDrawable
     }
     else if (drawable == 1)
     {
+        target_window = getSDLWindow();
+    }
+    else if (pbufferIsPbuffer(drawable))
+    {
+        // If the drawable is a pbuffer, we set the target window to the SDL window.
         target_window = getSDLWindow();
     }
     else
@@ -147,6 +154,9 @@ bool bridgeGlxMakeContextCurrent(Display *dpy, GLXDrawable drawable, GLXDrawable
     /* the game's framebuffer 0 again, which is the context's own binding */
     if ((SDL_GLContext)ctx == getSDLContext())
         lrOffscreenBind();
+
+    // Needs the context that just became current, so it belongs here.
+    pbufferBindDrawable(drawable);
 
     return 1;
 }
@@ -207,6 +217,11 @@ GLXContext bridgeGlxGetCurrentContext()
 
 GLXDrawable bridgeGlxGetCurrentDrawable()
 {
+    // If the current drawable is the pbuffer, return it, otherwise return 1 for the window.
+    GLXDrawable pbuffer = pbufferGetCurrentDrawable();
+    if (pbuffer != 0)
+        return pbuffer;
+
     if (SDL_GL_GetCurrentWindow() == getSDLWindow())
         return 1;
     return (GLXDrawable)getSDLWindow();
@@ -258,61 +273,6 @@ XVisualInfo *bridgeGlxGetVisualFromFBConfig(Display *dpy, GLXFBConfig config)
     return bridgeGlxChooseVisual(dpy, 0, NULL);
 }
 
-GLXPbuffer bridgeGlxCreatePbuffer(Display *dpy, GLXFBConfig config, const int *attrib_list)
-{
-    int width = 0;
-    int height = 0;
-
-    if (attrib_list)
-    {
-        for (int i = 0; attrib_list[i] != 0; i += 2)
-        {
-            if (attrib_list[i] == GLX_PBUFFER_WIDTH)
-            {
-                width = attrib_list[i + 1];
-            }
-            if (attrib_list[i] == GLX_PBUFFER_HEIGHT)
-            {
-                height = attrib_list[i + 1];
-            }
-        }
-    }
-
-    if (width == 0)
-        width = 512;
-    if (height == 0)
-        height = 512;
-
-    log_debug("Creating fake pbuffer (hidden window) of size %dx%d\n", width, height);
-
-    g_pbufWindow = SDL_CreateWindow("Fake Pbuffer", width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_BORDERLESS);
-
-    if (!g_pbufWindow)
-    {
-        log_error("Failed to create hidden window for Pbuffer: %s\n", SDL_GetError());
-        return 0;
-    }
-
-    return (GLXPbuffer)g_pbufWindow;
-}
-
-void bridgeGlxDestroyPbuffer(Display *dpy, GLXPbuffer pbuf)
-{
-    if (pbuf)
-        SDL_DestroyWindow((SDL_Window *)pbuf);
-}
-
-void bridgeGlxDestroyGLXPbufferSGIX(Display *dpy, GLXPbuffer pbuf)
-{
-    bridgeGlxDestroyPbuffer(dpy, pbuf);
-}
-
-GLXPbuffer bridgeGlxCreateGLXPbufferSGIX(Display *dpy, GLXFBConfig config, int width, int height, int *attrib_list)
-{
-    int pbufferAttribs[] = {
-        GLX_PBUFFER_WIDTH, width, GLX_PBUFFER_HEIGHT, height, GLX_PRESERVED_CONTENTS, true, GLX_LARGEST_PBUFFER, true, 0};
-    return bridgeGlxCreatePbuffer(dpy, config, pbufferAttribs);
-}
 
 GLXContext bridgeGlxCreateNewContext(Display *dpy, GLXFBConfig config, int render_type, GLXContext share_list, bool direct)
 {
@@ -441,6 +401,12 @@ void bridgeGlxSwapBuffers(Display *dpy, GLXDrawable drawable)
 {
     EmulatorConfig *config = getConfig();
 
+#ifdef _WIN32
+    // If drawable is pbuffer, we do not swap.
+    if (pbufferIsPbuffer(drawable))
+        return;
+#endif
+
     if (config->borderEnabled)
         drawGameBorder(config->width, config->height, config->whiteBorderPercentage, config->blackBorderPercentage);
 
@@ -455,6 +421,9 @@ void bridgeGlxSwapBuffers(Display *dpy, GLXDrawable drawable)
 
     SDL_GL_SwapWindow(getSDLWindow());
 
+    /* Runs after the swap so the buffers it clears are the ones the new size got. */
+    refreshResizedDrawable();
+
     if (libretroMode())
         libretroFrame();
     else if (config->fpsLimiter)
@@ -468,7 +437,7 @@ void bridgeGlxSwapBuffers(Display *dpy, GLXDrawable drawable)
     fpsOverlayUpdateFps(localFps);
 
     if (gId == QUIZ_AXA_SBMS || gId == QUIZ_AXA_SBUR_LIVE)
-        mj4TouchHolding();
+        eloTouchHolding();
 }
 
 int bridgeGlxGetVideoSyncSGI(unsigned int *count)
@@ -503,8 +472,8 @@ GLXContext glXCreateContext(Display *dpy, XVisualInfo *vis, GLXContext shareList
     GLXContext (*_glXCreateContext)(Display *dpy, XVisualInfo *vis, GLXContext shareList, int direct) =
         dlsym(RTLD_NEXT, "glXCreateContext");
 
+    GLXContext ctx;
     static int ctxCnt = 0;
-    GLXContext ctx = NULL;
     if (ctxCnt == 0)
         ctx = (GLXContext)getSDLContext();
     else

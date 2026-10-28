@@ -49,8 +49,8 @@ void initMain(char *configPath, char *controlsPath)
     controlsPath = getenv("LINUX_LOADER_CONTROLS_PATH");
     if (controlsPath == NULL || controlsPath[0] == '\0')
         controlsPath = "";
-#endif
 
+#endif
     initConfig(configPath);
 
     /* the libretro core's Resolution option, over linuxloader.ini's */
@@ -132,6 +132,10 @@ void initMain(char *configPath, char *controlsPath)
     // The libretro core's shared memory, and on Windows its audio hook
     libretroMode();
 
+    if (initEeprom() != 0)
+        exit(1);
+    log_info("EEPROM initialized");
+
     if (initPatch() != 0)
         exit(1);
     log_info("Patches initialized");
@@ -149,10 +153,6 @@ void initMain(char *configPath, char *controlsPath)
     if (initSDL() != 0)
         exit(1);
     log_info("SDL initialized");
-
-    if (initEeprom() != 0)
-        exit(1);
-    log_info("EEPROM initialized");
 
     if (initBaseboard() != 0)
         exit(1);

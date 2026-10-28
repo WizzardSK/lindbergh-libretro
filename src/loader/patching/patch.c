@@ -23,9 +23,101 @@
 #include "../graphics/shaderCache.h"
 #include "../graphics/shaderPatches.h"
 #include "../graphics/customCursor.h"
+#include "../graphics/phFboFeedback.h"
 #include "../graphics/glutBridge.h"
 #include "flowControl.h"
 #include "patchNetwork.h"
+#include "../log/log.h"
+#include <time.h>
+
+// House of the Dead 4 has the TSC frequency (2,992,610,000 Hz) hard-coded
+// On any other CPU the value is wrong and everything driven by
+// FrameRateMgr - including the cutscene event scripts - runs fast or slow in proportion.
+//
+// We measure the TSC once against a monotonic clock gives us a stable answer that does not move with boost clocks.
+// if CPU_FREQ is 0.0 we measure it, if not, the value set in the ini is used.
+
+static inline uint64_t readTsc(void)
+{
+    uint32_t low, high;
+    __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+    return ((uint64_t)high << 32) | low;
+}
+
+static double monotonicNow(void)
+{
+#if defined(_WIN32)
+    LARGE_INTEGER counter, frequency;
+    QueryPerformanceCounter(&counter);
+    QueryPerformanceFrequency(&frequency);
+    return (double)counter.QuadPart / (double)frequency.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
+}
+
+static void sleepMilliseconds(int milliseconds)
+{
+#if defined(_WIN32)
+    Sleep(milliseconds);
+#else
+    struct timespec ts = {milliseconds / 1000, (long)(milliseconds % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
+#endif
+}
+
+static uint32_t detectTscFrequency(void)
+{
+    static uint32_t cached = 0;
+
+    if (cached != 0)
+        return cached;
+
+    double start = monotonicNow();
+    uint64_t startTicks = readTsc();
+
+    sleepMilliseconds(50);
+
+    uint64_t endTicks = readTsc();
+    double elapsed = monotonicNow() - start;
+
+    if (elapsed <= 0.0)
+        return 0;
+
+    cached = (uint32_t)((double)(endTicks - startTicks) / elapsed);
+    return cached;
+}
+
+// Returns the value to patch into the game, or 0 to leave the stock constant alone.
+static uint32_t getPatchCpuFrequency(void)
+{
+    float configured = getConfig()->cpuFreqGhz;
+
+    if (configured != 0.0f)
+    {
+        uint32_t hz = (uint32_t)(configured * 998000000.0);
+        printf("CPU frequency: using configured CPU_FREQ_GHZ = %.3f (%u Hz)\n", configured, hz);
+        fflush(stdout);
+        return hz;
+    }
+
+    uint32_t detected = detectTscFrequency();
+
+    if (detected == 0)
+    {
+        printf("CPU frequency: detection failed, leaving the game's stock 2.99261 GHz constant\n");
+        fflush(stdout);
+        return 0;
+    }
+
+    log_info("CPU frequency: detected TSC %u Hz (%.4f GHz), game stock is 2992610000 Hz - patching\n", detected,
+           detected / 1e9);
+    fflush(stdout);
+
+    return detected;
+}
 
 extern uint32_t gId;
 char elfID[4];
@@ -33,6 +125,7 @@ void *amDipswContextAddr;
 
 extern void (*CPlayer_MainOri)(int);
 
+extern void (*vf5SetBroadcastAddrOri)(int, int, char *);
 extern void *customCursor;
 extern void *touchCursor;
 extern void *blankCursor;
@@ -531,10 +624,6 @@ int initPatch()
                 replaceCallAtAddress(0x082d48ac, compileWithCGC);
                 replaceCallAtAddress(0x082d4b3b, compileWithCGC);
             }
-            // Turns off the opponent marker at higher resolutions because it is out of place.
-            // if (getConfig()->width > 1360)
-            //     detourFunction(0x080f19a6, stubRetZero);
-
             if (getConfig()->harleyAnalogRemap)
                 originalAmJvspAckAnalogInput = trampolineHook((void *)0x08398737, harleyAnalogRemapHook, 6);
         }
@@ -2338,8 +2427,10 @@ int initPatch()
             detourFunction(0x08190e42, amDipswGetData);
             detourFunction(0x08190eba, amDipswSetLed);
 
-            // Taken from original patched OUTRUN 2 SP SDX by Android and improved a little
-            patchMemoryFromString(0x08105383, "e91f000000");
+            // Makes FFB work at any camera view
+            patchMemoryFromString(0x081053a0, "ff");
+
+            // HMM allocator: fixes the amemory allocator on modern linux distributions
             patchMemoryFromString(0x081095ff, "9090");
             patchMemoryFromString(0x08109603, "9090");
             patchMemoryFromString(0x08109609, "77");
@@ -2394,8 +2485,10 @@ int initPatch()
             detourFunction(0x08190db6, amDipswGetData);
             detourFunction(0x08190e2e, amDipswSetLed);
 
-            // Taken from original patched OUTRUN 2 SP SDX by Android and improved a little
-            patchMemoryFromString(0x08105317, "e91f000000");
+            // Makes FFB work at any camera view
+            patchMemoryFromString(0x08105334, "ff");
+
+            // HMM allocator: fixes the amemory allocator on modern linux distributions
             patchMemoryFromString(0x08109593, "9090");
             patchMemoryFromString(0x08109597, "9090");
             patchMemoryFromString(0x0810959D, "77");
@@ -2519,6 +2612,11 @@ int initPatch()
             detourFunction(0x0814012c, stubRetZero);
             patchMemoryFromString(0x08052cb2, "9090909090");
             cacheModedShaderFiles();
+
+            // Texture glitch hooks
+            replaceCallAtAddress(0x0805ad98, phBindFeedbackTexture);
+            replaceCallAtAddress(0x0805aeaa, phBindFeedbackTexture);
+            replaceCallAtAddress(0x0805c93b, phBindFeedbackTexture);
         }
         break;
         case QUIZ_AXA_SBMS:
@@ -2798,6 +2896,8 @@ int initPatch()
             // Shader Fixes
             cacheModedShaderFiles();
 
+            detourFunction(0x0804c8b4, gl_XGetProcAddressARB); // glXGetProcAddressARB
+
             //  test GLX
             //  detourFunction(0x0804c8b4, gl_XGetProcAddressARB); // glXGetProcAddressARB
             //  detourFunction(0x0804ce44, glXToSDLSwapBuffers);   // glXSwapBuffers
@@ -2814,11 +2914,9 @@ int initPatch()
                 detourFunction(0x0804be14, hod4VsPrintf);
             }
 
-            if (getConfig()->cpuFreqGhz != 0.0f)
-            {
-                uint32_t cpuFreq = (uint32_t)(getConfig()->cpuFreqGhz * 998000000.0);
+            uint32_t cpuFreq = getPatchCpuFrequency();
+            if (cpuFreq != 0)
                 setVariable(0x0828ea13, cpuFreq);
-            }
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVA_TEST:
@@ -2835,6 +2933,9 @@ int initPatch()
 
             // CPU patch to support AMD processors
             patchMemoryFromString(0x0804e46c, "9090909090"); //__intel_new_proc_init_P
+
+            // Enables gun vibration
+            securityBoardSetDipSwitch(1, 1);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVB:
@@ -2880,6 +2981,8 @@ int initPatch()
             // Shader Fixes
             cacheModedShaderFiles();
 
+            detourFunction(0x0804c8e4, gl_XGetProcAddressARB); // glXGetProcAddressARB
+
             // test GLX
             // detourFunction(0x0804c8e4, gl_XGetProcAddressARB); // glXGetProcAddressARB
             // detourFunction(0x0804ce64, glXToSDLSwapBuffers);   // glXSwapBuffers
@@ -2896,11 +2999,9 @@ int initPatch()
                 detourFunction(0x0804be04, hod4VsPrintf);
             }
 
-            if (getConfig()->cpuFreqGhz != 0.0f)
-            {
-                uint32_t cpuFreq = (uint32_t)(getConfig()->cpuFreqGhz * 998000000.0);
-                setVariable(0x08289353, cpuFreq);
-            }
+            uint32_t cpuFreq = getPatchCpuFrequency();
+            if (cpuFreq != 0)
+               setVariable(0x08289353, cpuFreq);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVB_TEST:
@@ -2917,6 +3018,9 @@ int initPatch()
 
             // CPU patch to support AMD processors
             patchMemoryFromString(0x08049f4d, "9090909090"); //__intel_new_proc_init_P
+
+            // Enables gun vibration
+            securityBoardSetDipSwitch(1, 1);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVC:
@@ -2944,6 +3048,8 @@ int initPatch()
             // Shader Fixes
             cacheModedShaderFiles();
 
+            detourFunction(0x0804c8e4, gl_XGetProcAddressARB); // glXGetProcAddressARB
+
             // test GLX
             // detourFunction(0x0804c8e4, gl_XGetProcAddressARB); // glXGetProcAddressARB
             // detourFunction(0x0804ce64, glXToSDLSwapBuffers);   // glXSwapBuffers
@@ -2960,11 +3066,9 @@ int initPatch()
                 detourFunction(0x0804be04, hod4VsPrintf);
             }
 
-            if (getConfig()->cpuFreqGhz != 0.0f)
-            {
-                uint32_t cpuFreq = (uint32_t)(getConfig()->cpuFreqGhz * 998000000.0);
+            uint32_t cpuFreq = getPatchCpuFrequency();
+            if (cpuFreq != 0)
                 setVariable(0x08289353, cpuFreq);
-            }
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVC_TEST:
@@ -2981,6 +3085,9 @@ int initPatch()
 
             // CPU patch to support AMD processors
             patchMemoryFromString(0x08049f4d, "9090909090"); //__intel_new_proc_init_P
+
+            // Enables gun vibration
+            securityBoardSetDipSwitch(1, 1);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SPECIAL_SBLS:
@@ -3002,11 +3109,9 @@ int initPatch()
 
             // Shader Fixes
             cacheModedShaderFiles();
-            if (getConfig()->cpuFreqGhz != 0.0f)
-            {
-                uint32_t cpuFreq = (uint32_t)(getConfig()->cpuFreqGhz * 998000000.0);
+            uint32_t cpuFreq = getPatchCpuFrequency();
+            if (cpuFreq != 0)
                 setVariable(0x0826829b, cpuFreq);
-            }
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SPECIAL_SBLS_REVB:
@@ -3026,13 +3131,13 @@ int initPatch()
             // CPU patch to support AMD processors
             patchMemoryFromString(0x0804d6c4, "9090909090"); //__intel_new_proc_init_P
 
+            detourFunction(0x0804cf10, gl_XGetProcAddressARB); // glXGetProcAddressARB
+
             // Shader Fixes
             cacheModedShaderFiles();
-            if (getConfig()->cpuFreqGhz != 0.0f)
-            {
-                uint32_t cpuFreq = (uint32_t)(getConfig()->cpuFreqGhz * 998000000.0);
+            uint32_t cpuFreq = getPatchCpuFrequency();
+            if (cpuFreq != 0)
                 setVariable(0x082d019d, cpuFreq);
-            }
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SPECIAL_SBLS_REVB_TEST:
@@ -3292,10 +3397,29 @@ int initPatch()
             detourFunction(0x088ad795, amDipswGetData);
             detourFunction(0x088ad80b, amDipswSetLed); // Stub amDipswSetLed
 
-            patchMemoryFromString(0x080e4c9b, "EB");
-            patchMemoryFromString(0x08108444, "EB");
-            patchMemoryFromString(0x081229c0, "05");
-            detourFunction(0x08123240, stubReturn);
+#ifdef __linux__
+            if (getConfig()->enableNetworkPatches)
+            {
+                // Skip dhcpd-bin check
+                detourFunction(0x088b4f0e, stubRetZero);
+
+                // Patch the broadcast address
+                vf5SetBroadcastAddrOri = (void (*)(int, int, char *))trampolineHook((void *)0x08122a2c, setVf5BroadcastAddr, 7);
+            }
+            else
+            {
+#endif
+                patchMemoryFromString(0x080e4c9b, "EB");
+                patchMemoryFromString(0x08108444, "EB");
+                patchMemoryFromString(0x081229c0, "05");
+                detourFunction(0x08123240, stubReturn);
+#ifdef __linux__
+            }
+#endif
+
+            // Patch to accept other res as server
+            patchMemoryFromString(0x08108455, "eb");
+
             patchMemoryFromString(0x88CAC4A, "2e2f72616d2f746f2e74787400");     // Patch /home/disk2 folder
             patchMemoryFromString(0x88CAC61, "2e2f72616d2f66726f6d2e74787400"); // Patch /home/disk2 folder
             patchMemoryFromString(0x88CAC7A, "2e2f72616d2f2e746d7000");         // Patch /home/disk2 folder
@@ -3303,6 +3427,9 @@ int initPatch()
             patchMemoryFromString(0x88CACBD, "2e2f666f6f3100");                 // Patch /home/disk2 folder
             patchMemoryFromString(0x88CACCE, "2e2f666f6f3200");                 // Patch /home/disk2 folder
             patchMemoryFromString(0x89DE5AA, "2e2f00");                         // Patch /home/disk2 folder
+
+            patchMemoryFromString(0x88cacad, "2e2f72616d00");
+            patchMemoryFromString(0x89ec9a4, "2e2f00");
             if (GPUVendor != NVIDIA_GPU)
             {
                 detourFunction(0x08052840, gl_ProgramStringARB);
@@ -3327,10 +3454,29 @@ int initPatch()
             detourFunction(0x088b01ad, amDipswGetData);
             detourFunction(0x088b0223, amDipswSetLed); // Stub amDipswSetLed
 
-            patchMemoryFromString(0x080e4ff5, "EB");
+#if __linux__
+            if (getConfig()->enableNetworkPatches)
+            {
+                // Skip dhcpd-bin check
+                detourFunction(0x088b76e6, stubRetZero);
+
+                // Patch the broadcast address
+                vf5SetBroadcastAddrOri = (void (*)(int, int, char *))trampolineHook((void *)0x08122a60, setVf5BroadcastAddr, 7);
+            }
+            else
+            {
+
+#endif
+                patchMemoryFromString(0x080e4ff5, "EB");
+                patchMemoryFromString(0x081084d5, "EB");
+                patchMemoryFromString(0x081229f4, "05");
+                detourFunction(0x0812326e, stubReturn);
+#if __linux__
+            }
+#endif
+
+            // Patch Resolution
             patchMemoryFromString(0x081084d5, "EB");
-            patchMemoryFromString(0x081229f4, "05");
-            detourFunction(0x0812326e, stubReturn);
             patchMemoryFromString(0x88CD42A, "2e2f72616d2f746f2e74787400");     // Patch /home/disk2 folder
             patchMemoryFromString(0x88CD441, "2e2f72616d2f66726f6d2e74787400"); // Patch /home/disk2 folder
             patchMemoryFromString(0x88CD45A, "2e2f72616d2f2e746d7000");         // Patch /home/disk2 folder
@@ -3338,6 +3484,9 @@ int initPatch()
             patchMemoryFromString(0x88CD49D, "2e2f666f6f3100");                 // Patch /home/disk2 folder
             patchMemoryFromString(0x88CD4AE, "2e2f666f6f3200");                 // Patch /home/disk2 folder
             patchMemoryFromString(0x89ED9C4, "2e2f00");                         // Patch /home/disk2 folder
+
+            patchMemoryFromString(0x88cd48d, "2e2f72616d00");
+            patchMemoryFromString(0x89ed9c4, "2e2f00");
 
             if (GPUVendor != NVIDIA_GPU)
             {
@@ -3798,8 +3947,7 @@ int initPatch()
                 detourFunction(0x0804d628, gl_Vertex3f);
                 detourFunction(0x0804dc58, gl_TexCoord2f);
                 patchMemoryFromString(0x0827473e, "31FF90");
-                // patchMemory(0x08173d17, "9090");
-                // detourFunction(0x0804da38, gl_ProgramStringARB);
+
                 cacheModedShaderFiles();
                 // Had to intercept some CPP file methods.
                 replaceCallAtAddress(0x0819ccaf, vt3Open);

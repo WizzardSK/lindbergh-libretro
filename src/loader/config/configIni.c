@@ -34,7 +34,7 @@ int createDefaultIni(const char *filePath)
     fprintf(file, "# Set the thickness of the black border which sits around the\n");
     fprintf(file, "# white border as a percentage of the width of the screen\n");
     fprintf(file, "BLACK_BORDER_PERCENTAGE = %.1f\n\n", defaults.blackBorderPercentage * 100.0f);
-    fprintf(file, "# Set to keep the aspect ratio in games like Sega Race TV Primeval Hunt and LGJ-SP\n");
+    fprintf(file, "# Set to keep the original aspect ratio in the games that support it\n#  (Sega Race TV, Primeval Hunt, LGJ-SP, GSEvo, After Burner Climax)\n");
     fprintf(file, "KEEP_ASPECT_RATIO = %s\n\n", defaults.keepAspectRatio ? "true" : "false");
     fprintf(file, "# Set to true to enable the mouse pointer/Cursor\nHIDE_CURSOR = %s\n\n", defaults.hideCursor ? "true" : "false");
     fprintf(file, "# Set to false if you don't want to limit the FPS\n");
@@ -121,8 +121,6 @@ int createDefaultIni(const char *filePath)
     fprintf(file, "PRIMEVAL_HUNT_SCREEN_MODE = %d\n\n", defaults.phScreenMode);
     fprintf(file, "# Set Primeval Hunt Test mode screen to single screen\n");
     fprintf(file, "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE = %s\n\n", defaults.phTestScreenSingle ? "true" : "false");
-    fprintf(file, "# Set to true to make Primeval Hunt use a special opengl.dll to fix the graphic glitches.\n");
-    fprintf(file, "PRIMEVAL_HUNT_USE_ZINK = %s\n\n", defaults.phUseZink ? "true" : "false");
     fprintf(file, "# Set to true to bypass cabinet checks including drive board and tower in Outrun 2 SP SDX\n");
     fprintf(file, "SKIP_OUTRUN_CABINET_CHECK = %s\n\n", defaults.skipOutrunCabinetCheck ? "true" : "false");
     fprintf(file, "# Hacky way to make MJ4 and AxA work at prohibited times\nMJ4_ENABLED_ALL_THE_TIME = %s\n\n",

@@ -10,3 +10,6 @@ extern SearchReplace id5ShaderReplaceSetForSmoke[];
 extern int id5ShaderReplaceSetForSmokeCount;
 extern SearchReplace idFsAti[];
 extern int idFsAtiCount;
+extern SearchReplace idVsBoneMax[];
+extern int idVsBoneMaxCount;
+char *splitParamLiterals(const char *program);

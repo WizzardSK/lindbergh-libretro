@@ -35,6 +35,10 @@ namespace GccBridge
         MAP("__strtod_internal", __strtod_internal);
         MAP("__strtol_internal", __strtol_internal);
         MAP("__strtoul_internal", __strtoul_internal);
+        MAP("__strtol_l", bridge__strtol_l);
+        MAP("__strtof_l", bridge__strtof_l);
+        MAP("__strtoul_l", bridge__strtoul_l);
+        MAP("__strtod_l", bridge__strtod_l);
         MAP("__strtof_internal", bridge__strtof_internal);
         MAP("__strtoll_internal", __strtoll_internal);
 
@@ -83,15 +87,36 @@ namespace GccBridge
         {
             return strtod(n, e);
         }
+
         long __strtol_internal(const char *n, char **e, int b, int g)
         {
             return strtol(n, e, b);
         }
+
+        long bridge__strtol_l(const char *n, char **e, int b, _locale_t loc)
+        {
+            return strtol(n, e, b);
+        }
+
+        float bridge__strtof_l(const char *n, char **e, _locale_t loc)
+        {
+            return strtof(n, e);
+        }
+
         unsigned long __strtoul_internal(const char *n, char **e, int b, int g)
         {
             return strtoul(n, e, b);
         }
 
+        unsigned long bridge__strtoul_l(const char *n, char **e, int b, _locale_t loc)
+        {
+            return strtoul(n, e, b);
+        }
+
+        double bridge__strtod_l(const char *n, char **e, _locale_t loc)
+        {
+            return strtod(n, e);
+        }
         float bridge__strtof_internal(const char *n, char **e, int g)
         {
             return strtof(n, e);

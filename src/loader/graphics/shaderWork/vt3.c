@@ -9,7 +9,11 @@ int vt3FilesToModCount = sizeof(vt3ShaderFilesToMod) / sizeof(ShaderFilesToMod);
 SearchReplace vt3ShaderReplaceSet1[] = {
     {"half face : FACE;", "//half face : FACE;"},
     {"n = (i.face > 0) ? -n : n;", "//n = (i.face > 0) ? -n : n;"},
-    {"#if PS_3_0_READY && NOISE", "#define PS_3_0_READY (0)\n#if PS_3_0_READY && NOISE"}};
+    {"#if PS_3_0_READY && NOISE", "#define PS_3_0_READY (0)\n#if PS_3_0_READY && NOISE"},
+    {"tex2Dproj(g_samp_planar_shadow, i.I_SHADOW_UV)",
+     "tex2D(g_samp_planar_shadow, i.I_SHADOW_UV.xy / i.I_SHADOW_UV.w)"},
+    {"tex2Dproj(g_samp_projection_shadow, i.I_SHADOW_UV)",
+     "tex2D(g_samp_projection_shadow, i.I_SHADOW_UV.xy / i.I_SHADOW_UV.w)"}};
 
 int vt3ShaderReplaceCount1 = sizeof(vt3ShaderReplaceSet1) / sizeof(SearchReplace);
 

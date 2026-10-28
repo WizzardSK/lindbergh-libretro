@@ -84,9 +84,12 @@ namespace FileSystemBridge
         MAP("select", sharedSelect);
         MAP("creat", bridgeCreat);
         MAP("mkdir", sharedMkdir);
+        MAP("rmdir", bridgeRmdir);
         MAP("getcwd", bridgeGetcwd);
         MAP("opendir", bridgeOpendir);
         MAP("readdir", bridgeReaddir);
+        MAP("readdir_r", bridgeReaddir_r);
+        MAP("readdir64_r", bridgeReaddir64_r);
         MAP("closedir", bridgeClosedir);
         MAP("clearerr", clearerr);
 
@@ -276,6 +279,16 @@ namespace FileSystemBridge
         return _creat(winPath, mode);
     }
 
+    int bridgeRmdir(const char *path)
+    {
+        if (strncmp(path, "/home/disk2/ram/tmp", 4) == 0)
+            return 0;
+
+        char winPath[MAX_PATH];
+        ConvertPath(winPath, path, MAX_PATH);
+        return _rmdir(winPath);
+    }
+
     char *bridgeGetcwd(char *buf, size_t size)
     {
         if (buf != nullptr)
@@ -387,6 +400,86 @@ extern "C"
         }
 
         return &dir->ent;
+    }
+
+    int bridgeReaddir64_r(void *dirp, struct linux_dirent64 *entry, struct linux_dirent64 **result)
+    {
+        if (!dirp || !entry || !result)
+            return -1;
+        DIR_Impl *dir = (DIR_Impl *)dirp;
+        if (dir->finished)
+        {
+            *result = NULL;
+            return 0;
+        }
+        if (dir->first_read)
+        {
+            dir->first_read = false;
+        }
+        else
+        {
+            if (!FindNextFileA(dir->hFind, &dir->findData))
+            {
+                dir->finished = true;
+                *result = NULL;
+                return 0;
+            }
+        }
+        memset(entry, 0, sizeof(struct linux_dirent64));
+        entry->d_ino = 1;
+        entry->d_off = 0;
+        strncpy(entry->d_name, dir->findData.cFileName, 255);
+        entry->d_reclen = (unsigned short)strlen(entry->d_name);
+        if (dir->findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            entry->d_type = 4; // DT_DIR
+        }
+        else
+        {
+            entry->d_type = 8; // DT_REG
+        }
+        *result = entry;
+        return 0;
+    }
+
+    int bridgeReaddir_r(void *dirp, struct linux_dirent *entry, struct linux_dirent **result)
+    {
+        if (!dirp || !entry || !result)
+            return -1;
+        DIR_Impl *dir = (DIR_Impl *)dirp;
+        if (dir->finished)
+        {
+            *result = NULL;
+            return 0;
+        }
+        if (dir->first_read)
+        {
+            dir->first_read = false;
+        }
+        else
+        {
+            if (!FindNextFileA(dir->hFind, &dir->findData))
+            {
+                dir->finished = true;
+                *result = NULL;
+                return 0;
+            }
+        }
+        memset(entry, 0, sizeof(struct linux_dirent));
+        entry->d_ino = 1;
+        entry->d_off = 0;
+        strncpy(entry->d_name, dir->findData.cFileName, 259);
+        entry->d_reclen = (unsigned short)strlen(entry->d_name);
+        if (dir->findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            entry->d_type = 4; // DT_DIR
+        }
+        else
+        {
+            entry->d_type = 8; // DT_REG
+        }
+        *result = entry;
+        return 0;
     }
 
     int bridgeClosedir(void *dirp)

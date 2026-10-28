@@ -8,7 +8,7 @@
 
 #define REAL_FUNC(name) dlsym(RTLD_NEXT, #name)
 
-extern DeviceType hooks[5];
+extern int hooks[DEVICE_COUNT];
 
 static int (*_tcgetattr)(int fd, struct termios *termios_p) = NULL;
 int tcgetattr(int fd, struct termios *termios_p)

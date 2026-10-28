@@ -34,7 +34,9 @@ public:
     bool CommitSegment(uintptr_t vaddr, uintptr_t memsz);
 
     static void* customMalloc(size_t size);
-    static struct mallinfo customMallinfo(void);
+    // Must pop the hidden result pointer the i386 SysV way, or the guest runs
+    // 4 bytes off alignment for the rest of the calling function.
+    __attribute__((callee_pop_aggregate_return(1))) static struct mallinfo customMallinfo(void);
     static void* customCalloc(size_t nmemb, size_t size);
     static void* customRealloc(void* ptr, size_t size);
     static void customFree(void* ptr);

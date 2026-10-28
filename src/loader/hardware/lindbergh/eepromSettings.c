@@ -7,6 +7,7 @@
 #endif
 
 #include "eepromSettings.h"
+#include "loader/config/config.h"
 
 uint32_t crc32Table[256];
 
@@ -93,8 +94,7 @@ int createStaticSection()
     unsigned char *buff = &eepromBuffer[eepromOffsetTable[STATIC].offset];
     memset(buff, 0, eepromOffsetTable[STATIC].size);
     buff[14] = 0;
-    //memcpy(buff + 15, "AAGX-01A00009999", 16);
-    memcpy(buff + 15, "AALG-TG-933F3904", 16);
+    memcpy(buff + 15, "A69E-01A12345678", 16);
     return 0;
 }
 
@@ -243,6 +243,21 @@ int setIP(FILE *eeprom, char *ipAddress, char *netMask)
     }
     return 0;
 }
+
+VF5CabinetMode getVF5CabinetMode(FILE *eeprom)
+{
+    VF5CabinetMode mode = getConfig()->vf5CabinetMode;
+    fseek(eeprom, 0, SEEK_END);
+    int size = ftell(eeprom);
+    fseek(eeprom, 0, SEEK_SET);
+    if (size > 0x1000)
+    {
+        fseek(eeprom, 0x1017, SEEK_SET);
+        fread(&mode, 1, 1, eeprom);
+    }
+    return mode;
+}
+
 
 int eepromSettingsInit( FILE *eeprom)
 {

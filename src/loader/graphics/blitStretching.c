@@ -73,7 +73,7 @@ void blitSetWidthandHeightSize()
             blitHeight = gHeight;
         }
     }
-    else if (gId == GHOST_SQUAD_EVOLUTION_SBNJ || gGrp == GROUP_VT3_TEST)
+    else if (gGrp == GROUP_VT3_TEST)
     {
         blitWidth = 640;
         blitHeight = 480;
@@ -120,6 +120,46 @@ int blitInitializeFbo()
 
     fboInitialized = true;
     return 1;
+}
+/*
+ * Fixes Primeval Hunt aim if the window is resize
+ */
+void blitWindowToRender(float windowX, float windowY, float *renderX, float *renderY)
+{
+    float x = windowX;
+    float y = windowY;
+
+    if (dest.W > 0 && dest.H > 0 && renderWidth > 0 && renderHeight > 0)
+    {
+        x = (windowX - (float)dest.X) * (float)renderWidth / (float)dest.W;
+        y = (windowY - (float)dest.Y) * (float)renderHeight / (float)dest.H;
+    }
+
+    if (renderX != NULL)
+        *renderX = x;
+    if (renderY != NULL)
+        *renderY = y;
+}
+
+/*
+ * Inverse of blitWindowToRender: takes a point in the game's render space and returns
+ * where it lands on screen once blitStretch has scaled and letterboxed the frame.
+ */
+void blitRenderToWindow(float renderX, float renderY, float *windowX, float *windowY)
+{
+    float x = renderX;
+    float y = renderY;
+
+    if (dest.W > 0 && dest.H > 0 && renderWidth > 0 && renderHeight > 0)
+    {
+        x = (float)dest.X + renderX * (float)dest.W / (float)renderWidth;
+        y = (float)dest.Y + renderY * (float)dest.H / (float)renderHeight;
+    }
+
+    if (windowX != NULL)
+        *windowX = x;
+    if (windowY != NULL)
+        *windowY = y;
 }
 
 void lrOffscreenBind(void)

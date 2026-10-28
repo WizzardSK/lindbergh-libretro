@@ -74,7 +74,7 @@ int posix_memalign(void **memptr, size_t alignment, size_t size)
     return res;
 }
 
-void *emcpy(void *dest, const void *src, size_t n)
+void *memcpy(void *dest, const void *src, size_t n)
 {
     if (gGrp == GROUP_ABC && dest == src)
     {

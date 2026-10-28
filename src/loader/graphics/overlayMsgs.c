@@ -808,25 +808,19 @@ void overlayRender(void)
    
     if (getConfig()->crc32 == PRIMEVAL_HUNT_SBPP && getConfig()->phScreenMode != 0)
     {
-        extern int phX, phY2, phW, phH;
-        areaX = phX;
-        switch (getConfig()->phScreenMode)
-        {
-            case 1:
-                areaY = phY2;
-                break;
-            case 2:
-                areaY = phY2;
-                break;
-            case 3:
-                areaY = 0;
-                break;
-            case 4:
-                areaY = 0;
-                break;;
-        }
-        areaW = phW;
-        areaH = phH;
+        extern int phX, phW, phH;
+        extern int phYWin;
+
+        /* The ph* screens live in the game's render space, but we draw over the window,
+         * so put the 1st screen through the same scale and letterbox blitStretch applies. */
+        float x0, y0, x1, y1;
+        blitRenderToWindow((float)phX, (float)phYWin, &x0, &y0);
+        blitRenderToWindow((float)(phX + phW), (float)(phYWin + phH), &x1, &y1);
+
+        areaX = (int)x0;
+        areaY = (int)y0;
+        areaW = (int)(x1 - x0);
+        areaH = (int)(y1 - y0);
     }
     else
     {
@@ -834,11 +828,14 @@ void overlayRender(void)
         areaY = dest.Y;
         areaW = dest.W > 0 ? dest.W : vpW;
         areaH = dest.H > 0 ? dest.H : vpH;
-        if (areaW <= 0 || areaH <= 0)
-        {
-            areaW = vpW;
-            areaH = vpH;
-        }
+    }
+
+    if (areaW <= 0 || areaH <= 0)
+    {
+        areaX = 0;
+        areaY = 0;
+        areaW = vpW;
+        areaH = vpH;
     }
 
     for (int i = 0; i < MAX_OVERLAY_SLOTS; i++)

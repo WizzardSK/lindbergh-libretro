@@ -17,7 +17,9 @@
 #include <netdb.h>
 #include <sys/ioctl.h>
 #else
+#include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #endif
 
 extern uint32_t gId;
@@ -26,7 +28,183 @@ char *rtunedSortedIPs[4];
 uint8_t rtunedLinkId = 0;
 uint8_t rtunedCabs = 0;
 
+void (*vf5SetBroadcastAddrOri)(int, int, char*) = NULL;
+
 typedef struct sockaddr_in Sockaddr;
+
+
+#ifndef __linux__
+static int getWindowsNetworkInfo(char *outIp, char *outMask)
+{
+    ULONG bufLen = sizeof(IP_ADAPTER_INFO);
+    PIP_ADAPTER_INFO adapterInfo = (PIP_ADAPTER_INFO)malloc(bufLen);
+    if (adapterInfo == NULL)
+    {
+        return 0;
+    }
+
+    if (GetAdaptersInfo(adapterInfo, &bufLen) == ERROR_BUFFER_OVERFLOW)
+    {
+        free(adapterInfo);
+        adapterInfo = (PIP_ADAPTER_INFO)malloc(bufLen);
+        if (adapterInfo == NULL)
+        {
+            return 0;
+        }
+    }
+
+    if (GetAdaptersInfo(adapterInfo, &bufLen) == NO_ERROR)
+    {
+        const char *targetNic = getConfig()->nicName;
+        PIP_ADAPTER_INFO adapterPtr = adapterInfo;
+        PIP_ADAPTER_INFO selectedAdapter = NULL;
+
+        while (adapterPtr != NULL)
+        {
+            if (targetNic != NULL && targetNic[0] != '\0')
+            {
+                if (strstr(adapterPtr->AdapterName, targetNic) != NULL ||
+                    strstr(adapterPtr->Description, targetNic) != NULL)
+                {
+                    selectedAdapter = adapterPtr;
+                    break;
+                }
+            }
+            else if (strcmp(adapterPtr->IpAddressList.IpAddress.String, "0.0.0.0") != 0 &&
+                     strcmp(adapterPtr->IpAddressList.IpAddress.String, "127.0.0.1") != 0)
+            {
+                if (selectedAdapter == NULL)
+                {
+                    selectedAdapter = adapterPtr;
+                }
+            }
+            adapterPtr = adapterPtr->Next;
+        }
+
+        if (selectedAdapter == NULL && adapterInfo != NULL)
+        {
+            selectedAdapter = adapterInfo;
+        }
+
+        if (selectedAdapter != NULL)
+        {
+            if (outIp != NULL)
+            {
+                strncpy(outIp, selectedAdapter->IpAddressList.IpAddress.String, INET_ADDRSTRLEN - 1);
+                outIp[INET_ADDRSTRLEN - 1] = '\0';
+            }
+            if (outMask != NULL)
+            {
+                strncpy(outMask, selectedAdapter->IpAddressList.IpMask.String, INET_ADDRSTRLEN - 1);
+                outMask[INET_ADDRSTRLEN - 1] = '\0';
+            }
+            free(adapterInfo);
+            return 1;
+        }
+    }
+
+    free(adapterInfo);
+    return 0;
+}
+#endif
+
+char *getInterfaceIPAddr()
+{
+#ifdef __linux__
+    int fd;
+    struct ifreq ifr;
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == -1) {
+        return "192.168.1.200";
+    }
+    ifr.ifr_addr.sa_family = AF_INET;
+    strncpy(ifr.ifr_name, getConfig()->nicName, IFNAMSIZ - 1);
+    
+    if (ioctl(fd, SIOCGIFADDR, &ifr) == -1) {
+        close(fd);
+        return "192.168.1.200";
+    }
+    close(fd);
+    return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+#else
+    static char ipBuf[INET_ADDRSTRLEN];
+    if (getWindowsNetworkInfo(ipBuf, NULL)) {
+        return ipBuf;
+    }
+    return "192.168.1.200";
+#endif
+}
+
+char *getNetworkMask()
+{
+#ifdef __linux__
+    int fd;
+    struct ifreq ifr;
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == -1) {
+        return "255.255.255.0";
+    }
+    ifr.ifr_addr.sa_family = AF_INET;
+    strncpy(ifr.ifr_name, getConfig()->nicName, IFNAMSIZ - 1);
+    
+    if (ioctl(fd, SIOCGIFNETMASK, &ifr) == -1) {
+        close(fd);
+        return "255.255.255.0";
+    }
+    close(fd);
+    return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+#else
+    static char maskBuf[INET_ADDRSTRLEN];
+    if (getWindowsNetworkInfo(NULL, maskBuf)) {
+        return maskBuf;
+    }
+    return "255.255.255.0";
+#endif
+}
+
+char *getBroadcastAddr()
+{
+    static char bcastBuf[INET_ADDRSTRLEN];
+
+    const char *ipStr = getInterfaceIPAddr();
+    struct in_addr ipAddr;
+    if (inet_pton(AF_INET, ipStr, &ipAddr) <= 0)
+    {
+        log_error("getBroadcastAddr: Invalid IP address format '%s'", ipStr);
+        return "192.168.1.255";
+    }
+
+    const char *maskStr = getNetworkMask();
+    struct in_addr maskAddr;
+    if (inet_pton(AF_INET, maskStr, &maskAddr) <= 0)
+    {
+        log_error("getBroadcastAddr: Invalid network mask format '%s'", maskStr);
+        return "192.168.1.255";
+    }
+
+    uint32_t ipHost = ntohl(ipAddr.s_addr);
+    uint32_t maskHost = ntohl(maskAddr.s_addr);
+
+    uint32_t bcastHost = ipHost | (~maskHost);
+
+    struct in_addr bcastAddr;
+    bcastAddr.s_addr = htonl(bcastHost);
+
+    if (inet_ntop(AF_INET, &bcastAddr, bcastBuf, INET_ADDRSTRLEN) == NULL)
+    {
+        log_error("getBroadcastAddr: inet_ntop failed to format broadcast address");
+        return "192.168.1.255";
+    }
+
+    return bcastBuf;
+}
+
+void setVf5BroadcastAddr(int a, int b, char* c)
+{
+    vf5SetBroadcastAddrOri(a, b, getBroadcastAddr());
+}
 
 void hummerSetIPs(size_t firstAddress)
 {

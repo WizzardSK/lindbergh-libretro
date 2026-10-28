@@ -10,6 +10,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
+#include <locale.h>
 #include <setjmp.h>
 #include <process.h>
 #include <sys/time.h>
@@ -89,6 +90,7 @@ namespace LibcBridge
         MAP("gmtime_r", bridgeGmtime_R);
         MAP("strftime", bridgeStrftime);
         MAP("ftime", bridgeFtime);
+        MAP("difftime", bridgeDifftime);
 
         // abort/exit
         MAP("abort", bridgeAbort);
@@ -118,6 +120,11 @@ namespace LibcBridge
         MAP("__wctype_l", bridgeWctypeL);
         MAP("__iswctype_l", bridgeIswctypeL);
         MAP("mbsrtowcs", bridgeMbsrtowcs);
+
+        MAP("__isinf", bridgeIsinf);
+        MAP("__isinff", bridgeIsinff);
+        MAP("__isnan", bridgeIsnan);
+        MAP("__isnanf", bridgeIsnanf);
 
         // gettext
         MAP("gettext", bridgeGettext);
@@ -165,10 +172,11 @@ namespace LibcBridge
         MAP("sigfillset", bridgeSigfillset);
         MAP("sigemptyset", bridgeSigemptyset);
         MAP("sigaction", bridgeSigaction);
+        MAP("setrlimit", bridgeStubSuccess);
         MAP("alarm", bridgeStubSuccess);
-        MAP("qsort", qsort);
+        MAP("qsort", bridgeQsort);
         MAP("poll", bridgePoll);
-        MAP("bsearch", bsearch);
+        MAP("bsearch", bridgeBsearch);
         MAP("realpath", bridgeRealpath);
         MAP("popen", bridgePopen);
         MAP("pclose", bridgePclose);
@@ -201,6 +209,11 @@ namespace LibcBridge
         MAP("dlerror", sharedDlerror);
 
         MAP("kswap_collect", sharedKswap_collect);
+
+        MAP("glob64", bridgeGlob);
+        MAP("glob", bridgeGlob);
+        MAP("globfree64", bridgeGlobfree);
+        MAP("globfree", bridgeGlobfree);
         MAP("bzero", bridgeBzero);
 
         // Wide char string functions
@@ -299,9 +312,68 @@ namespace LibcBridge
         MemoryManager::customFree(thrown_exception);
     }
 
+    // glibc and msvcrt number the LC_* categories differently, so the guest's
+    // category cannot be forwarded as-is: glibc LC_ALL (6) is past msvcrt's max.
+#define L_LC_IDENTIFICATION 12
+
+    static const int kLinuxToCrtLocaleCategory[L_LC_IDENTIFICATION + 1] = {
+        LC_CTYPE,    // 0  LC_CTYPE
+        LC_NUMERIC,  // 1  LC_NUMERIC
+        LC_TIME,     // 2  LC_TIME
+        LC_COLLATE,  // 3  LC_COLLATE
+        LC_MONETARY, // 4  LC_MONETARY
+        -1,          // 5  LC_MESSAGES - no msvcrt equivalent
+        LC_ALL,      // 6  LC_ALL
+        -1,          // 7  LC_PAPER
+        -1,          // 8  LC_NAME
+        -1,          // 9  LC_ADDRESS
+        -1,          // 10 LC_TELEPHONE
+        -1,          // 11 LC_MEASUREMENT
+        -1,          // 12 LC_IDENTIFICATION
+    };
+
     char *bridgeSetlocale(int category, const char *locale)
     {
-        return setlocale(category, locale);
+        // Never hand back NULL: callers such as std::__convert_to_v strdup() the
+        // query result unchecked.
+        static char cLocale[] = "C";
+
+        if (category < 0 || category > L_LC_IDENTIFICATION)
+        {
+            log_warn("setlocale: unknown Linux category %d, reporting \"C\"", category);
+            return cLocale;
+        }
+
+        const int crtCategory = kLinuxToCrtLocaleCategory[category];
+        if (crtCategory < 0)
+        {
+            log_trace("setlocale: Linux category %d has no msvcrt equivalent, reporting \"C\"", category);
+            return cLocale;
+        }
+
+        if (locale == nullptr)
+        {
+            char *current = setlocale(crtCategory, nullptr);
+            return current ? current : cLocale;
+        }
+
+        // "" means "from the environment" on glibc (unset LANG here, so "C") but
+        // means the Windows system locale to msvcrt. Pin "", "POSIX" and "C" alike.
+        const char *crtLocale = locale;
+        if (locale[0] == '\0' || strcmp(locale, "POSIX") == 0)
+            crtLocale = "C";
+
+        char *result = setlocale(crtCategory, crtLocale);
+        if (result == nullptr)
+        {
+            // msvcrt takes Windows locale names only; glibc's "ja_JP.eucJP" and
+            // friends are rejected outright.
+            log_warn("setlocale(category %d -> %d, \"%s\") rejected by msvcrt, falling back to \"C\"", category, crtCategory,
+                     locale);
+            result = setlocale(crtCategory, "C");
+        }
+
+        return result ? result : cLocale;
     }
 
     struct FakeLocaleStruct
@@ -436,6 +508,11 @@ namespace LibcBridge
     }
 
     int bridgeIsinf(double x)
+    {
+        return std::isinf(x) ? 1 : 0;
+    }
+
+    int bridgeIsinff(float x)
     {
         return std::isinf(x) ? 1 : 0;
     }
@@ -887,10 +964,198 @@ namespace LibcBridge
         return nullptr;
     }
 
+    static int lcIsoYearP(int y)
+    {
+        int p = (y + y / 4 - y / 100 + y / 400) % 7;
+        return p < 0 ? p + 7 : p;
+    }
+
+    static int lcIsoWeeksInYear(int y)
+    {
+        return (lcIsoYearP(y) == 4 || lcIsoYearP(y - 1) == 3) ? 53 : 52;
+    }
+
+    // ISO 8601 week-based year; *week receives the week number, 1..53.
+    static int lcIsoWeekYear(const struct tm *timeptr, int *week)
+    {
+        int year = timeptr->tm_year + 1900;
+        int yday = timeptr->tm_yday + 1;         // 1-based
+        int wday = (timeptr->tm_wday + 6) % 7;   // Monday == 0
+        int w = (yday - wday + 9) / 7;
+
+        if (w < 1)
+        {
+            year--;
+            w = lcIsoWeeksInYear(year);
+        }
+        else if (w > lcIsoWeeksInYear(year))
+        {
+            year++;
+            w = 1;
+        }
+
+        *week = w;
+        return year;
+    }
+
+    // msvcrt's strftime is C89-only and fails the whole conversion on any other
+    // specifier, so rewrite glibc's extras first. False only if `out` is too small.
+    static bool translateStrftimeFormat(const char *format, const struct tm *timeptr, char *out, size_t outSize)
+    {
+        static const char msvcrtSpecifiers[] = "aAbBcdHIjmMpSUwWxXyYzZ%";
+        size_t o = 0;
+
+        auto emit = [&](const char *text) -> bool {
+            while (*text)
+            {
+                if (o + 1 >= outSize)
+                    return false;
+                out[o++] = *text++;
+            }
+            return true;
+        };
+
+        for (const char *p = format; *p != '\0'; ++p)
+        {
+            if (*p != '%')
+            {
+                if (o + 1 >= outSize)
+                    return false;
+                out[o++] = *p;
+                continue;
+            }
+
+            ++p;
+            // %E/%O alternate forms: no msvcrt locale differs, so use the base
+            // specifier.
+            if (*p == 'E' || *p == 'O')
+                ++p;
+            if (*p == '\0')
+                break;
+
+            if (strchr(msvcrtSpecifiers, *p) != nullptr)
+            {
+                if (o + 2 >= outSize)
+                    return false;
+                out[o++] = '%';
+                out[o++] = *p;
+                continue;
+            }
+
+            char scratch[32];
+            const char *sub = nullptr;
+            switch (*p)
+            {
+            case 'C':
+                snprintf(scratch, sizeof scratch, "%02d", (timeptr->tm_year + 1900) / 100);
+                sub = scratch;
+                break;
+            case 'D':
+                sub = "%m/%d/%y";
+                break;
+            case 'e':
+                snprintf(scratch, sizeof scratch, "%2d", timeptr->tm_mday);
+                sub = scratch;
+                break;
+            case 'F':
+                sub = "%Y-%m-%d";
+                break;
+            case 'h':
+                sub = "%b";
+                break;
+            case 'k':
+                snprintf(scratch, sizeof scratch, "%2d", timeptr->tm_hour);
+                sub = scratch;
+                break;
+            case 'l':
+            {
+                int hour12 = timeptr->tm_hour % 12;
+                if (hour12 == 0)
+                    hour12 = 12;
+                snprintf(scratch, sizeof scratch, "%2d", hour12);
+                sub = scratch;
+                break;
+            }
+            case 'n':
+                sub = "\n";
+                break;
+            case 'P':
+                sub = (timeptr->tm_hour < 12) ? "am" : "pm";
+                break;
+            case 'r':
+                sub = "%I:%M:%S %p";
+                break;
+            case 'R':
+                sub = "%H:%M";
+                break;
+            case 's':
+            {
+                struct tm copy = *timeptr;
+                copy.tm_isdst = -1;
+                snprintf(scratch, sizeof scratch, "%lld", (long long)mktime(&copy));
+                sub = scratch;
+                break;
+            }
+            case 't':
+                sub = "\t";
+                break;
+            case 'T':
+                sub = "%H:%M:%S";
+                break;
+            case 'u':
+                snprintf(scratch, sizeof scratch, "%d", timeptr->tm_wday == 0 ? 7 : timeptr->tm_wday);
+                sub = scratch;
+                break;
+            case 'G':
+            {
+                int week;
+                snprintf(scratch, sizeof scratch, "%d", lcIsoWeekYear(timeptr, &week));
+                sub = scratch;
+                break;
+            }
+            case 'g':
+            {
+                int week;
+                snprintf(scratch, sizeof scratch, "%02d", lcIsoWeekYear(timeptr, &week) % 100);
+                sub = scratch;
+                break;
+            }
+            case 'V':
+            {
+                int week;
+                lcIsoWeekYear(timeptr, &week);
+                snprintf(scratch, sizeof scratch, "%02d", week);
+                sub = scratch;
+                break;
+            }
+            default:
+                // Unknown to both libcs: drop it rather than lose the whole format.
+                log_warn("strftime: dropping unsupported specifier %%%c", *p);
+                continue;
+            }
+
+            if (!emit(sub))
+                return false;
+        }
+
+        if (o >= outSize)
+            return false;
+        out[o] = '\0';
+        return true;
+    }
+
     size_t bridgeStrftime(char *s, size_t maxsize, const char *format, const struct tm *timeptr)
     {
         log_trace("Intercepted strftime");
-        return strftime(s, maxsize, format, timeptr);
+
+        char translated[512];
+        if (!translateStrftimeFormat(format, timeptr, translated, sizeof translated))
+        {
+            log_warn("strftime: format too long to translate, passing through: %s", format);
+            return strftime(s, maxsize, format, timeptr);
+        }
+
+        return strftime(s, maxsize, translated, timeptr);
     }
 
     void bridgeFtime(struct timeb *tp)
@@ -899,6 +1164,11 @@ namespace LibcBridge
         ftime(tp);
     }
 
+    double bridgeDifftime(time_t time1, time_t time2)
+    {
+        log_trace("Intercepted difftime");
+        return difftime(time1, time2);
+    }
     int bridgeSysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
     {
         log_trace("Intercepted sysctl");
@@ -914,6 +1184,7 @@ namespace LibcBridge
     int bridgeSystem(const char *command)
     {
         log_debug("system(\"%s\")", command);
+
         if (strcmp(command, "touch /var/tmp/mwlogo") == 0)
             command = "type nul > .\\tmp\\mwlogo";
 
@@ -1004,6 +1275,82 @@ namespace LibcBridge
         return 0;
     }
 
+    // msvcrt keeps Windows' 4-byte stack alignment, so qsort/bsearch/signal would
+    // enter guest callbacks misaligned. Route them through realigning trampolines.
+
+    // Per thread, saved and restored around each call, so a comparator that itself
+    // sorts or searches still finds its own comparator afterwards.
+    static thread_local int (*t_guestCompare)(const void *, const void *) = nullptr;
+
+    __attribute__((force_align_arg_pointer)) static int compareTrampoline(const void *a, const void *b)
+    {
+        return t_guestCompare(a, b);
+    }
+
+    void bridgeQsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *))
+    {
+        int (*outer)(const void *, const void *) = t_guestCompare;
+        t_guestCompare = compar;
+        qsort(base, nmemb, size, compareTrampoline);
+        t_guestCompare = outer;
+    }
+
+    void *bridgeBsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *))
+    {
+        int (*outer)(const void *, const void *) = t_guestCompare;
+        t_guestCompare = compar;
+        void *found = bsearch(key, base, nmemb, size, compareTrampoline);
+        t_guestCompare = outer;
+        return found;
+    }
+
+    // Guest handlers by CRT signal number, plus the Linux number each was registered
+    // under, so the guest gets its own numbering back (SIGABRT is 6 vs msvcrt's 22).
+    static void (*volatile g_guestSignalHandlers[NSIG])(int);
+    static volatile int g_guestSignalNumbers[NSIG];
+
+    __attribute__((force_align_arg_pointer)) static void signalTrampoline(int crtSig)
+    {
+        if (crtSig < 0 || crtSig >= NSIG)
+            return;
+        void (*handler)(int) = g_guestSignalHandlers[crtSig];
+        if (handler != SIG_DFL && handler != SIG_IGN)
+            handler(g_guestSignalNumbers[crtSig]);
+    }
+
+    // The handler the guest should see for one the CRT reports.
+    static void (*guestVisibleHandler(int crtSig, void (*crtHandler)(int)))(int)
+    {
+        return crtHandler == signalTrampoline ? g_guestSignalHandlers[crtSig] : crtHandler;
+    }
+
+    // Installs a guest handler behind the trampoline, returning the previous handler
+    // as the guest knows it. SIG_DFL and SIG_IGN go straight to the CRT.
+    static void (*installGuestSignal(int linuxSig, int crtSig, void (*handler)(int)))(int)
+    {
+        if (handler == SIG_DFL || handler == SIG_IGN)
+        {
+            void (*prev)(int) = signal(crtSig, handler);
+            return prev == SIG_ERR ? SIG_ERR : guestVisibleHandler(crtSig, prev);
+        }
+
+        void (*prevGuest)(int) = g_guestSignalHandlers[crtSig];
+        int prevNumber = g_guestSignalNumbers[crtSig];
+
+        // Publish first, so a signal arriving mid-install finds the handler.
+        g_guestSignalNumbers[crtSig] = linuxSig;
+        g_guestSignalHandlers[crtSig] = handler;
+
+        void (*prev)(int) = signal(crtSig, signalTrampoline);
+        if (prev == SIG_ERR)
+        {
+            g_guestSignalHandlers[crtSig] = prevGuest;
+            g_guestSignalNumbers[crtSig] = prevNumber;
+            return SIG_ERR;
+        }
+        return prev == signalTrampoline ? prevGuest : prev;
+    }
+
     int bridgeRand_r(unsigned int *seedp)
     {
         log_debug("rand_r() called");
@@ -1045,7 +1392,7 @@ namespace LibcBridge
                 return (void (*)(int))-1; // SIG_ERR
         }
 
-        return signal(win_sig, handler);
+        return installGuestSignal(signum, win_sig, handler);
     }
 
     int bridgeRaise(int sig)
@@ -1134,7 +1481,7 @@ namespace LibcBridge
 
         if (act)
         {
-            old_handler = signal(win_sig, act->sa_handler);
+            old_handler = installGuestSignal(signum, win_sig, act->sa_handler);
             if (old_handler == SIG_ERR)
                 return -1;
         }
@@ -1142,6 +1489,7 @@ namespace LibcBridge
         {
             old_handler = signal(win_sig, SIG_DFL);
             signal(win_sig, old_handler);
+            old_handler = guestVisibleHandler(win_sig, old_handler);
         }
 
         if (oldact)
@@ -1240,6 +1588,134 @@ namespace LibcBridge
     {
         log_trace("Intercepted nice: inc=%d", inc);
         return 0;
+    }
+
+    struct linux_glob32_t
+    {
+        uint32_t gl_pathc;
+        uint32_t gl_pathv; // char **
+        uint32_t gl_offs;
+        int32_t gl_flags;
+        uint32_t gl_closedir;
+        uint32_t gl_readdir;
+        uint32_t gl_opendir;
+        uint32_t gl_lstat;
+        uint32_t gl_stat;
+    };
+
+    int bridgeGlob(const char *pattern, int flags, int (*errfunc)(const char *eacces, int errcode), void *pglob)
+    {
+        log_info("Intercepted glob: %s, flags: 0x%X", pattern, flags);
+        if (!pglob)
+            return -1;
+
+        linux_glob32_t *g = (linux_glob32_t *)pglob;
+
+        bool append = (flags & 0x0020); // GLOB_APPEND
+        bool dooffs = (flags & 0x0008); // GLOB_DOOFFS
+
+        if (!append)
+        {
+            g->gl_pathc = 0;
+            g->gl_pathv = 0;
+        }
+
+        std::vector<std::string> results;
+
+        WIN32_FIND_DATAA findData;
+        HANDLE hFind = FindFirstFileA(pattern, &findData);
+        if (hFind != INVALID_HANDLE_VALUE)
+        {
+            do
+            {
+                if (strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0)
+                    continue;
+
+                std::string fullPath;
+                std::string patStr(pattern);
+                size_t slash = patStr.find_last_of("/\\");
+                if (slash != std::string::npos)
+                {
+                    fullPath = patStr.substr(0, slash + 1) + findData.cFileName;
+                }
+                else
+                {
+                    fullPath = findData.cFileName;
+                }
+
+                if ((flags & 0x0002) && (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                { // GLOB_MARK
+                    fullPath += "/";
+                }
+
+                results.push_back(fullPath);
+            } while (FindNextFileA(hFind, &findData));
+            FindClose(hFind);
+        }
+
+        if (results.empty() && (flags & 0x0010))
+        { // GLOB_NOCHECK
+            results.push_back(pattern);
+        }
+
+        if (results.empty() && !append)
+        {
+            return 3; // GLOB_NOMATCH
+        }
+
+        size_t reserve = dooffs ? g->gl_offs : 0;
+        size_t total_paths = g->gl_pathc + results.size();
+
+        uint32_t *pathv = (uint32_t *)MemoryManager::customRealloc((void *)g->gl_pathv, (reserve + total_paths + 1) * sizeof(uint32_t));
+        if (!pathv)
+            return 1; // GLOB_NOSPACE
+
+        if (!append)
+        {
+            for (size_t i = 0; i < reserve; ++i)
+            {
+                pathv[i] = 0;
+            }
+        }
+
+        for (size_t i = 0; i < results.size(); ++i)
+        {
+            char *str = MemoryManager::customStrdup(results[i].c_str());
+            pathv[reserve + g->gl_pathc + i] = (uint32_t)str;
+        }
+
+        pathv[reserve + total_paths] = 0; // null terminator
+
+        g->gl_pathv = (uint32_t)pathv;
+        g->gl_pathc = total_paths;
+        g->gl_flags = flags;
+
+        return 0; // Success
+    }
+
+    void bridgeGlobfree(void *pglob)
+    {
+        if (!pglob)
+            return;
+        linux_glob32_t *g = (linux_glob32_t *)pglob;
+
+        if (g->gl_pathv)
+        {
+            uint32_t *pathv = (uint32_t *)g->gl_pathv;
+            size_t reserve = (g->gl_flags & 0x0008) ? g->gl_offs : 0;
+            size_t total = reserve + g->gl_pathc;
+
+            for (size_t i = 0; i < total; ++i)
+            {
+                if (pathv[i])
+                {
+                    MemoryManager::customFree((void *)pathv[i]);
+                }
+            }
+            MemoryManager::customFree(pathv);
+            g->gl_pathv = 0;
+            g->gl_pathc = 0;
+        }
     }
 
     int bridgePoll(struct pollfd *fds, int nfds, int timeout)
@@ -1498,7 +1974,13 @@ namespace LibcBridge
         }
         fmt[i] = 0;
         size_t cap = (maxsize < 256) ? maxsize : 256;
-        size_t res = strftime(out, cap, fmt, timeptr);
+
+        char translated[512];
+        const char *effective = fmt;
+        if (translateStrftimeFormat(fmt, timeptr, translated, sizeof translated))
+            effective = translated;
+
+        size_t res = strftime(out, cap, effective, timeptr);
         for (i = 0; i < res; i++)
             s[i] = (uint32_t)out[i];
         if (maxsize > res)

@@ -11,12 +11,15 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "../config/config.h"
 #include "../graphics/customCursor.h"
 #include "../graphics/glxBridge.h"
+#include "../graphics/overlayMsgs.h"
 #include "flowControl.h"
 #include "patchResolution.h"
 
@@ -31,6 +34,10 @@ int srtvX = 0;
 int srtvW, srtvH;
 int phX, phY, phW, phH;
 int phX2, phY2, phW2, phH2;
+/* phY/phY2 are GL viewport offsets (origin bottom-left). phYWin/phY2Win are the
+ * same screens expressed in window/mouse space (origin top-left). They only
+ * differ from phY/phY2 when the layout is vertically asymmetric (screen mode 4). */
+int phYWin, phY2Win;
 
 int vf5FSwidth;
 
@@ -121,6 +128,12 @@ static void (*idDisplayTextureOri)(void *, void *, int, int, int);
 static void (*idDrawBallonOri)(void *, void *, float, float, float, float, float, bool) = NULL;
 
 static void (*abcDrawSpriteOri)(void *);
+static int gsevoScanLines = 480; // night-vision line count, see the GSE case
+static int gsevoPortraitW = 100, gsevoPortraitH = 250;
+static void (*gsevoPutSpriteOri)(void *, float) = (void (*)(void *, float))0x08160dd0;
+static void (*gsevoGLFlipOri)(void) = NULL;
+static void (*gsevoBeginDraw2DFlipYOri)(void) = NULL;
+static void(__attribute__((regparm(3))) * gsevoDrawEffectLinesOri)(void *, void *, int) = NULL;
 
 float newHeightLGJ, newWidth2LGJ, newWidthHLGJ, newWidthSLGJ;
 
@@ -194,18 +207,6 @@ void bridgeglOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
             }
         }
         break;
-        case SEGA_RACE_TV_SBPF:
-        {
-            if (gWidth != 640 && gHeight != 480)
-            {
-                if ((right == 640.0 && bottom == 480.0) && (gWidth != 640 && gHeight != 480))
-                {
-                    right = 600000.0;
-                    bottom = 600000.0;
-                }
-            }
-        }
-        break;
         case THE_HOUSE_OF_THE_DEAD_EX_SBRC:
         {
             if (gWidth != 1360 && gHeight != 768)
@@ -223,6 +224,142 @@ void bridgeglOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
 #else
     return glOrtho(left, right, bottom, top, zNear, zFar);
 #endif
+}
+
+#ifdef __linux__
+// True when the current quad spans the whole render target but is drawn in the 640x480 ortho.
+static bool gsevoOversizedQuad(void)
+{
+    GLfloat proj[16];
+    glad_glGetFloatv(GL_PROJECTION_MATRIX, proj);
+    double orthoW = (proj[0] != 0.0f) ? 2.0 / proj[0] : 0.0;
+    if (orthoW < 600.0 || orthoW > 700.0)
+        return false;
+
+    // Client-array reads are only valid when no VBO is bound.
+    GLint vbo = 0, stride = 0, size = 0;
+    void *vptr = NULL;
+    glad_glGetIntegerv(0x8896, &vbo);
+    glad_glGetPointerv(GL_VERTEX_ARRAY_POINTER, &vptr);
+    glad_glGetIntegerv(GL_VERTEX_ARRAY_STRIDE, &stride);
+    glad_glGetIntegerv(GL_VERTEX_ARRAY_SIZE, &size);
+    if (vbo || !vptr)
+        return false;
+
+    int st = stride ? stride / 4 : (size ? size : 3);
+    const float *v = (const float *)vptr;
+    float x0 = v[0], y0 = v[1], x1 = v[0], y1 = v[1];
+    for (int k = 1; k < 4; k++)
+    {
+        float x = v[k * st], y = v[k * st + 1];
+        if (x < x0)
+            x0 = x;
+        if (x > x1)
+            x1 = x;
+        if (y < y0)
+            y0 = y;
+        if (y > y1)
+            y1 = y;
+    }
+    return x0 > -1.0f && y0 > -1.0f && fabsf(x1 - gWidth) < 2.0f && fabsf(y1 - gHeight) < 2.0f;
+}
+
+#undef glDrawArrays
+void glDrawArrays(GLenum mode, GLint first, GLsizei count)
+{
+    // A few GSEvo sprites are sized from the render target but drawn in the 640x480 sprite ortho,
+    // so they hang off the right and bottom. Give just those a matching ortho.
+    if (gId == GHOST_SQUAD_EVOLUTION_SBNJ && count == 4 && gWidth > 640 && gsevoOversizedQuad())
+    {
+        glad_glMatrixMode(GL_PROJECTION);
+        glad_glPushMatrix();
+        glad_glLoadIdentity();
+        glad_glOrtho(0.0, (double)gWidth, (double)gHeight, 0.0, -1.0, 1.0);
+        glad_glMatrixMode(GL_MODELVIEW);
+
+        glad_glDrawArrays(mode, first, count);
+
+        glad_glMatrixMode(GL_PROJECTION);
+        glad_glPopMatrix();
+        glad_glMatrixMode(GL_MODELVIEW);
+        return;
+    }
+
+    glad_glDrawArrays(mode, first, count);
+}
+#endif
+
+static GLuint srtvFbo = 0;
+static GLuint srtvScratchTex = 0;
+static bool srtvScratchBound = false;
+
+// CDriveFilter's blur draws a fullscreen quad into the back buffer for Render() to copy out.
+// Stretched it paints over the scene, unstretched it shows in the corner, so hand it an offscreen
+// target seeded with the scene.
+static void srtvBindScratch(GLsizei width, GLsizei height)
+{
+    if (srtvFbo == 0)
+        glad_glGenFramebuffers(1, &srtvFbo);
+
+    if (srtvScratchTex == 0)
+    {
+        glad_glGenTextures(1, &srtvScratchTex);
+        glad_glBindTexture(GL_TEXTURE_2D, srtvScratchTex);
+        glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glad_glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    glad_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, srtvFbo);
+    glad_glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, srtvScratchTex, 0);
+    glad_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glad_glBlitFramebuffer(srtvX, 0, srtvX + srtvW, srtvH, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, srtvFbo);
+    srtvScratchBound = true;
+}
+
+// SRTV grabs the screen as a 640x480 read from the back buffer origin, but the scene is stretched
+// to srtvW x srtvH at srtvX, so the copy would land on a crop of it. glCopyTexSubImage2D cannot
+// scale, so blit the real scene rect in instead.
+#ifdef __linux__
+#undef glCopyTexSubImage2D
+void glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height)
+{
+#else
+void bridgeglCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height)
+{
+#endif
+    if (srtvScratchBound)
+    {
+        glad_glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
+        glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        srtvScratchBound = false;
+        return;
+    }
+
+    if (gId == SEGA_RACE_TV_SBPF && srtvW > 0 && target == GL_TEXTURE_2D && x == 0 && y == 0 && width == 640 && height == 480)
+    {
+        GLint tex = 0, readFbo = 0, drawFbo = 0;
+        glad_glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+        glad_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFbo);
+        glad_glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
+
+        if (tex != 0 && readFbo == 0)
+        {
+            if (srtvFbo == 0)
+                glad_glGenFramebuffers(1, &srtvFbo);
+
+            glad_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, srtvFbo);
+            glad_glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, level);
+            glad_glBlitFramebuffer(srtvX, 0, srtvX + srtvW, srtvH, xoffset, yoffset, xoffset + width, yoffset + height, GL_COLOR_BUFFER_BIT,
+                                   GL_LINEAR);
+            glad_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFbo);
+            return;
+        }
+    }
+
+    return glad_glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
 }
 
 /**
@@ -271,11 +408,19 @@ void bridgeglViewport(GLint x, GLint y, GLsizei width, GLsizei height)
     {
         if (gWidth != 640 && gHeight != 480)
         {
-            if (width == 640 && height == 480 && addr == (void *)0x08123932)
+            // The filters call glViewport() directly with the game's 640x480 screen, so they land
+            // in the corner instead of over the stretched scene.
+            if (width == 640 && height == 480 &&
+                (addr == (void *)0x08123932 || // klSetViewport()
+                 addr == (void *)0x083cbfa0))  // CDriveFilter::Render()
             {
                 x = srtvX;
                 width = srtvW;
                 height = srtvH;
+            }
+            else if (width == 640 && height == 480 && addr == (void *)0x083c6575) // CDriveFilter::PixelBlur()
+            {
+                srtvBindScratch(width, height);
             }
             else if (width > 640)
             {
@@ -353,21 +498,6 @@ void bridgeglViewport(GLint x, GLint y, GLsizei width, GLsizei height)
             }
         }
     }
-#ifdef _WIN32
-    else if (gGrp == GROUP_ABC)
-    {
-        if (bridgeGlxGetCurrentDrawable() > 1)
-        {
-            glad_glCullFace(GL_FRONT);
-        }
-        if (width > gWidth || height > gHeight)
-        {
-            void *addr = __builtin_return_address(0);
-            width = gWidth;
-            height = gHeight;
-        }
-    }
-#endif
     return glad_glViewport(x, y, width, height);
 }
 
@@ -404,6 +534,66 @@ void bridgeglTexImage2D(unsigned int target, int level, int internalformat, int 
         }
     }
     return glad_glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+}
+
+// DXT1's 1-bit alpha decodes transparent texels to black, and magnifying the art bleeds that black
+// into every cut-out edge - the stray frame around GSEvo's empty portrait slot. Recolour those
+// texels from their opaque neighbours and re-upload; alpha, and so the cut-out itself, is kept.
+void gsevoBleedAlpha(unsigned int target, int level, unsigned int internalformat, int width, int height)
+{
+    if (gId != GHOST_SQUAD_EVOLUTION_SBNJ || gWidth == 640)
+        return;
+    if (target != GL_TEXTURE_2D || internalformat != GL_COMPRESSED_RGBA_S3TC_DXT1_EXT)
+        return;
+
+    unsigned char *px = malloc((size_t)width * height * 4);
+    if (!px)
+        return;
+    glad_glGetTexImage(GL_TEXTURE_2D, level, GL_RGBA, GL_UNSIGNED_BYTE, px);
+
+    // Safe in place: only transparent texels are written, only opaque ones are read.
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            unsigned char *t = px + ((size_t)y * width + x) * 4;
+            if (t[3])
+                continue;
+
+            int r = 0, g = 0, b = 0, n = 0;
+            for (int ny = y ? y - 1 : 0; ny <= y + 1 && ny < height; ny++)
+            {
+                for (int nx = x ? x - 1 : 0; nx <= x + 1 && nx < width; nx++)
+                {
+                    const unsigned char *s = px + ((size_t)ny * width + nx) * 4;
+                    if (s[3])
+                    {
+                        r += s[0];
+                        g += s[1];
+                        b += s[2];
+                        n++;
+                    }
+                }
+            }
+            if (n)
+            {
+                t[0] = r / n;
+                t[1] = g / n;
+                t[2] = b / n;
+            }
+        }
+    }
+
+    glad_glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    free(px);
+}
+
+#undef glCompressedTexImage2D
+void glCompressedTexImage2D(unsigned int target, int level, unsigned int internalformat, int width, int height, int border, int imageSize,
+                            const void *data)
+{
+    glad_glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
+    gsevoBleedAlpha(target, level, internalformat, width, height);
 }
 
 #ifdef __linux__
@@ -1067,6 +1257,105 @@ void vf5WidthFix(void *param1)
 //     __asm__ volatile("push %%ebp\n\tmov $0x3, %%ecx\n\tjmp *%0\n\t" ::"m"(abcDrawSpriteCAVEAddress));
 // }
 
+// GSEvo's GLFlip() presents through BeginDraw2D(), sharing its ortho with the HUD: the HUD needs
+// 640x480, the present quad needs the render size. Swap the doubles around each pass that needs it.
+#define GSEVO_ORTHO_W 0x081b6080
+#define GSEVO_ORTHO_H 0x081b6078
+
+// The extents live in read-only data, so they go through setVariable() rather than a plain store.
+static void gsevoSetOrtho(double w, double h)
+{
+    unsigned int *wPtr = (unsigned int *)&w;
+    unsigned int *hPtr = (unsigned int *)&h;
+    setVariable(GSEVO_ORTHO_W, wPtr[0]);
+    setVariable(GSEVO_ORTHO_W + 4, wPtr[1]);
+    setVariable(GSEVO_ORTHO_H, hPtr[0]);
+    setVariable(GSEVO_ORTHO_H + 4, hPtr[1]);
+}
+
+// The scene is presented through here as a render-target-sized sprite, but these ortho doubles are
+// shared with BeginDraw2D(), which the HUD needs at 640x480 - so swap them just for this pass.
+void gsevoBeginDraw2DFlipY(void)
+{
+    void *ra = __builtin_return_address(0);
+
+    // Every caller presents a render-target-sized quad except these two, which draw line geometry
+    // in 640x480 space: draw_effect_lines and ev_hologram_disp.
+    if (ra == (void *)0x080dc4b7 || ra == (void *)0x080e70f5)
+    {
+        gsevoBeginDraw2DFlipYOri();
+        return;
+    }
+
+    gsevoSetOrtho((double)gWidth, (double)gHeight);
+    gsevoBeginDraw2DFlipYOri();
+    gsevoSetOrtho(640.0, 480.0);
+}
+
+// ctrl_filter_scanline() builds the scanlines in 640x480 space and uses those values as vertex
+// positions *and* texcoords. Positions are fine on the stock ortho, but the texcoords then sample
+// only a 640x480 corner of the scene texture, so scale the texture matrix instead of the geometry.
+__attribute__((regparm(3))) void gsevoDrawEffectLines(void *a, void *b, int c)
+{
+    // The texture matrix is per unit and draw_effect_lines() samples on unit 0, so select it
+    // explicitly or the scale lands on whichever unit happened to be active.
+    GLint prevUnit = 0x84c0;
+    glad_glGetIntegerv(0x8E28, &prevUnit); // GL_ACTIVE_TEXTURE
+    glad_glActiveTexture(0x84c0);
+
+    // The effect's vertical resolution is its line count, so the ortho, the texcoords and the line
+    // thickness all key off gsevoScanLines rather than the stock 480.
+    gsevoSetOrtho(640.0, (double)gsevoScanLines);
+
+    glad_glMatrixMode(GL_TEXTURE);
+    glad_glPushMatrix();
+    glad_glLoadIdentity();
+    glad_glScalef((float)gWidth / 640.0f, (float)gHeight / (float)gsevoScanLines, 1.0f);
+    glad_glMatrixMode(GL_MODELVIEW);
+
+    // Lines rasterise at a fixed pixel width whatever the ortho, so on a taller target they leave
+    // gaps the untinted scene shows through. Widen them by the factor the viewport grew.
+    GLfloat prevWidth = 1.0f;
+    glad_glGetFloatv(GL_LINE_WIDTH, &prevWidth);
+    GLfloat want = (GLfloat)gHeight / (GLfloat)gsevoScanLines;
+    GLfloat range[2] = {1.0f, 1.0f};
+    glad_glGetFloatv(0x846E, range); // GL_ALIASED_LINE_WIDTH_RANGE
+    if (want > range[1])
+        want = range[1];
+    glad_glLineWidth(want);
+
+    gsevoDrawEffectLinesOri(a, b, c);
+
+    glad_glLineWidth(prevWidth);
+    gsevoSetOrtho(640.0, 480.0);
+
+    glad_glActiveTexture(0x84c0);
+    glad_glMatrixMode(GL_TEXTURE);
+    glad_glPopMatrix();
+    glad_glMatrixMode(GL_MODELVIEW);
+    glad_glActiveTexture((GLenum)prevUnit);
+}
+
+// SPRARGS uses one rect for both the texel source and the on-screen quad, so enlarging the portrait
+// to sample a bigger texture would enlarge the sprite too. The scale at +0x18/+0x1c is the only way
+// to separate them - multiply, the 0x2f character variant already writes 0.96 into scaleY.
+static void gsevoPutPortraitSprite(void *args, float prio)
+{
+    float *scale = (float *)((char *)args + 0x18);
+    scale[0] *= 100.0f / gsevoPortraitW;
+    scale[1] *= 250.0f / gsevoPortraitH;
+    gsevoPutSpriteOri(args, prio);
+}
+
+void gsevoGLFlip(void)
+{
+    gsevoSetOrtho((double)gWidth, (double)gHeight);
+
+    gsevoGLFlipOri();
+
+    gsevoSetOrtho(640.0, 480.0);
+}
+
 void abcDrawSprite(void *p1)
 {
     SprArgs *x = (SprArgs *)p1;
@@ -1226,34 +1515,285 @@ void hookABCGLFunctions(uint32_t glBindTextureAddr, uint32_t glVertex3fAddr1, ui
     replaceCallAtAddress(glVertex3fAddr2 + 0x7b, glVertex3fABC2);
 }
 
-bool harleyTestCalled = false;
-float harleyMarkerX = 2560.0;
-float harleyMarkerY = 1440.0;
+static float harleyScreenW = 1360.0f;
+static float harleyScreenH = 768.0f;
 
-uint32_t *harleyMarkerXPtr = (uint32_t *)&harleyMarkerX;
-uint32_t *harleyMarkerYPtr = (uint32_t *)&harleyMarkerY;
-
-void harleyTest1(int param1)
+/*
+ * The marker's position arrives in framebuffer pixels but the HUD plane is 1360x768, and
+ * 0x080c5d3e rescales it as design space a second time. Convert, then point its constants
+ * at the live resolution so that second rescale collapses to an identity.
+ */
+static struct
 {
-    harleyTestCalled = true;
-    (((void (*)(int p1))0x080c5d3e)(param1));
+    void *obj;
+    float x, y;
+} harleyMarkers[4];
+
+static int harleyMarkerSlot(void *obj, bool create)
+{
+    static int next = 0;
+    int i;
+
+    for (i = 0; i < 4; i++)
+        if (harleyMarkers[i].obj == obj)
+            return i;
+
+    if (!create)
+        return -1;
+
+    i = next;
+    next = (next + 1) & 3;
+    harleyMarkers[i].obj = obj;
+    harleyMarkers[i].x = harleyMarkers[i].y = 0.0f;
+    return i;
 }
 
-int harleyTest2()
+/*
+ * The converted position has to stay in the object - the marker draws from those fields -
+ * but must not be converted twice. Put the raw values back before the game recomputes.
+ */
+static void harleyMarkerUpdate(void *obj)
 {
-    if (harleyTestCalled)
+    int i = harleyMarkerSlot(obj, false);
+
+    if (i >= 0)
     {
-        setVariable(0x080c5dd7, (size_t)harleyMarkerXPtr);
-        setVariable(0x080c5ddf, (size_t)harleyMarkerYPtr);
-        harleyTestCalled = false;
-        return 0;
+        *(float *)((unsigned char *)obj + 0x30) = harleyMarkers[i].x;
+        *(float *)((unsigned char *)obj + 0x34) = harleyMarkers[i].y;
     }
-    else
+
+    ((void (*)(void *))0x080f19a6)(obj);
+}
+
+static void harleyMarkerProject(void *marker)
+{
+    float *px = (float *)((unsigned char *)marker + 0x20);
+    float *py = (float *)((unsigned char *)marker + 0x24);
+    int i = harleyMarkerSlot((unsigned char *)marker - 0x10, true);
+
+    harleyMarkers[i].x = *px;
+    harleyMarkers[i].y = *py;
+    *px *= 1360.0f / harleyScreenW;
+    *py *= 768.0f / harleyScreenH;
+
+    setVariable(0x080c5dd7, (size_t)&harleyScreenW);
+    setVariable(0x080c5ddf, (size_t)&harleyScreenH);
+    setVariable(0x080c5f72, (size_t)&harleyScreenW);
+    setVariable(0x080c5f86, (size_t)&harleyScreenH);
+
+    ((void (*)(void *))0x080c5d3e)(marker);
+
+    setVariable(0x080c5dd7, 0x0840c008);
+    setVariable(0x080c5ddf, 0x0840c00c);
+    setVariable(0x080c5f72, 0x0840c008);
+    setVariable(0x080c5f86, 0x0840c00c);
+}
+
+/*
+ * The 2D message layer ("insert coins", in-race text) is authored in 1360x768 units, and the
+ * game shifts it by a resolution-dependent amount that does not follow from the resolution.
+ * Nothing identifies the layer at draw time either, so it is picked out by depth.
+ */
+static const float harleyTextX = 0.0f; /* attract text position at 1360x768 */
+static const float harleyTextY = -203.5f;
+
+static float harleyMsgDx, harleyMsgDy;
+static bool harleyMsgReady;
+static float harleyMinX = 1e9f, harleyMaxX = -1e9f, harleyMinY = 1e9f, harleyMaxY = -1e9f;
+static int harleyMsgVerts;
+
+static float harleyLayerDepth(float z)
+{
+    return z + 5.716f * harleyScreenH - 872.7f;
+}
+
+/*
+ * Full-screen effects share these depths, so a texture seen reaching outside the frame is
+ * not treated as text - testing each vertex alone would tear such a mesh in half. Decided
+ * The flag decays instead of being permanent: texture ids get recycled between scenes, so a
+ * permanent flag would silently kill text that later reuses the id. Decay rather than a hard
+ * per-frame reset because glClear runs several times a frame, one per pass.
+ */
+static unsigned char harleyBigTex[1024];
+
+static bool harleyTextTex(float x, float y)
+{
+    unsigned int t = (unsigned int)curTextureID;
+
+    if (t >= 1024)
+        return false;
+    if (fabsf(x) >= harleyScreenW || fabsf(y) >= harleyScreenH)
+        harleyBigTex[t] = 30;
+
+    return harleyBigTex[t] == 0;
+}
+
+/* +100.8 attract text, +116.8 in-race messages; the attract video at +125.3 must not move */
+static bool harleyIsMessageLayer(float x, float y, float z)
+{
+    float d = harleyLayerDepth(z);
+
+    return d > 90.0f && d < 121.0f && harleyTextTex(x, y);
+}
+
+static bool harleyIsAttractText(float x, float y, float z)
+{
+    float d = harleyLayerDepth(z);
+
+    return d > 95.0f && d < 110.0f && harleyTextTex(x, y);
+}
+
+/* Measure the shift against the known native position; one frame of text is enough. */
+void glClearHarley(GLbitfield mask)
+{
+    int i;
+
+    for (i = 0; i < 1024; i++)
+        if (harleyBigTex[i] != 0)
+            harleyBigTex[i]--;
+
+    if (!harleyMsgReady && harleyMsgVerts >= 32)
     {
-        setVariable(0x080c5dd7, 0x0840c008);
-        setVariable(0x080c5ddf, 0x0840c00c);
-        return 0;
+        harleyMsgDx = harleyTextX - (harleyMinX + harleyMaxX) / 2.0f;
+        harleyMsgDy = harleyTextY - (harleyMinY + harleyMaxY) / 2.0f;
+        harleyMsgReady = true;
     }
+
+    glad_glClear(mask);
+}
+
+static void harleyMessageVertex(GLfloat *x, GLfloat *y, GLfloat z)
+{
+    if (harleyIsAttractText(*x, *y, z))
+    {
+        if (*x < harleyMinX)
+            harleyMinX = *x;
+        if (*x > harleyMaxX)
+            harleyMaxX = *x;
+        if (*y < harleyMinY)
+            harleyMinY = *y;
+        if (*y > harleyMaxY)
+            harleyMaxY = *y;
+        harleyMsgVerts++;
+    }
+
+    if (!harleyMsgReady)
+    {
+        *x = *y = 1e6f; /* park it off screen until the shift is known */
+        return;
+    }
+
+    *x = (*x + harleyMsgDx) * (harleyScreenW / 1360.0f);
+    *y = (*y + harleyMsgDy) * (harleyScreenH / 768.0f);
+}
+
+void glVertex3fHarley(GLfloat x, GLfloat y, GLfloat z)
+{
+    if (harleyIsMessageLayer(x, y, z))
+        harleyMessageVertex(&x, &y, z);
+
+    glad_glVertex3f(x, y, z);
+}
+
+void glVertex3fvHarley(const GLfloat *v)
+{
+    GLfloat c[3] = {v[0], v[1], v[2]};
+
+    if (harleyIsMessageLayer(v[0], v[1], v[2]))
+        harleyMessageVertex(&c[0], &c[1], c[2]);
+
+    glad_glVertex3fv(c);
+}
+
+/*
+ * Traffic signs are NN layout nodes baked against 1360x768, so they land at design
+ * coordinates read as screen pixels. Every other 2D element carries a scale; the signs draw
+ * at scale 1.0, which is what picks them out. Correct to screen * (W/1360, H/768).
+ */
+static GLenum harleyMtxMode = 0;
+static float harleyProjX = 0.0f, harleyProjY = 0.0f;
+
+static bool harleyIsSign(const GLfloat *m)
+{
+    return m[0] == 1.0f && m[5] == 1.0f && m[10] == 1.0f && m[1] == 0.0f && m[2] == 0.0f && m[4] == 0.0f && m[6] == 0.0f && m[8] == 0.0f &&
+           m[9] == 0.0f && (m[12] != 0.0f || m[13] != 0.0f) && m[14] < -1000.0f;
+}
+
+void glMatrixModeHarley(GLenum mode)
+{
+    harleyMtxMode = mode;
+    glad_glMatrixMode(mode);
+}
+
+void glLoadMatrixfHarley(const GLfloat *m)
+{
+    if (harleyMtxMode == GL_PROJECTION)
+    {
+        harleyProjX = m[0];
+        harleyProjY = m[5];
+    }
+    else if (harleyMtxMode == GL_MODELVIEW && harleyProjX != 0.0f && harleyIsSign(m))
+    {
+        float z = -m[14];
+        float kx = harleyScreenW / 1360.0f;
+        float ky = harleyScreenH / 768.0f;
+        GLfloat c[16];
+
+        memcpy(c, m, sizeof(c));
+        c[12] = kx * m[12] + (kx - 1.0f) * z / harleyProjX;
+        c[13] = ky * m[13] + (1.0f - ky) * z / harleyProjY;
+        glad_glLoadMatrixf(c);
+        return;
+    }
+
+    glad_glLoadMatrixf(m);
+}
+
+/* Range of SpkPrimitiveDrawTexturePolygonStrip2D, both halves, the only thing drawing the
+ * caption cards. Set per revision below; zero leaves it inert. */
+uintptr_t hod4SpkTexPolyLo = 0;
+uintptr_t hod4SpkTexPolyHi = 0;
+
+/* Grows the card in place. Corners are six floats each (x, y, unused, colour, u, v) in layout
+ * pixels, scaled about their own centre on a copy so the game's own array is untouched. */
+static void (*hod4SpkStripOriginal)(float *, unsigned int, void *) = NULL;
+
+#define HOD4_SPK_FLOATS_PER_VERTEX 6
+#define HOD4_SPK_MAX_VERTICES 256
+
+static void hod4SpkTexPolyStrip2D(float *verts, unsigned int count, void *matrix)
+{
+    static float scaled[HOD4_SPK_FLOATS_PER_VERTEX * HOD4_SPK_MAX_VERTICES];
+
+    if (verts != NULL && count > 0 && count <= HOD4_SPK_MAX_VERTICES)
+    {
+        float scaleX = gWidth / 1280.0f;
+        float scaleY = gHeight / 768.0f;
+        float centreX = 0.0f, centreY = 0.0f;
+
+        memcpy(scaled, verts, count * HOD4_SPK_FLOATS_PER_VERTEX * sizeof(float));
+
+        for (unsigned int i = 0; i < count; i++)
+        {
+            centreX += scaled[i * HOD4_SPK_FLOATS_PER_VERTEX];
+            centreY += scaled[i * HOD4_SPK_FLOATS_PER_VERTEX + 1];
+        }
+        centreX /= (float)count;
+        centreY /= (float)count;
+
+        for (unsigned int i = 0; i < count; i++)
+        {
+            float *vx = &scaled[i * HOD4_SPK_FLOATS_PER_VERTEX];
+            float *vy = &scaled[i * HOD4_SPK_FLOATS_PER_VERTEX + 1];
+
+            *vx = (*vx - centreX) * scaleX + centreX;
+            *vy = (*vy - centreY) * scaleY + centreY;
+        }
+
+        verts = scaled;
+    }
+
+    hod4SpkStripOriginal(verts, count, matrix);
 }
 
 void glVertex3fHOD4(GLfloat x, GLfloat y, GLfloat z)
@@ -1287,9 +1827,22 @@ void glVertex3fHOD4(GLfloat x, GLfloat y, GLfloat z)
     float AdjOffsetX = OffsetX * scaleZ;
     float AdjOffsetY = OffsetY * scaleZ;
 
+    if (hod4SpkTexPolyLo != 0)
+    {
+        uintptr_t calledFrom = (uintptr_t)__builtin_return_address(0);
+
+        if (calledFrom >= hod4SpkTexPolyLo && calledFrom < hod4SpkTexPolyHi)
+        { /* Card face, already sized at the draw call. Has to go out here, ahead of the z chain,
+           * or the texture filter on the z == -1.0 layer would drop it. */
+            glad_glVertex3f(x, y, z);
+            return;
+        }
+    }
+
     if (z == -1.000000f)
-    { // 3d
-      // printf("glVertex3f hooked: x=%f, y=%f, z=%f\n", x, y, z);
+    { // 3d, and the CellSprite layer
+        if (curTextureID != 5)
+            return;
     }
     else if (z == -1.000010f)
     { // subtitles
@@ -1670,36 +2223,6 @@ void glVertex3f2SP(GLfloat x, GLfloat y, GLfloat z)
     glad_glVertex3f(x, y, z);
 }
 
-void glVertex3fHarley(GLfloat x, GLfloat y, GLfloat z)
-{
-    float scaleX = gWidth / 1360.0f;
-    float scaleY = gHeight / 768.0f;
-
-    float OffsetX = ((gWidth - 1360.0) / 2.0) * 0.85;
-    float OffsetY = ((gHeight - 768.0) / 2.0) * 0.85;
-
-    if (curTextureID == 71)
-    {
-        x += OffsetX;
-        y -= OffsetY;
-        x *= scaleX;
-        y *= scaleY;
-    }
-    void *addr = __builtin_return_address(0);
-    // printf("glVertex3f is hooked: x=%f, y=%f, z=%f\n", x, y, z);
-    // printf("z values: %.10f\n", z);
-
-    // if ( z == -3517.2272949219f){ //1360x768
-    // if ( z == -4271.795898f){ //900p
-    if (z == -5300.7529296875)
-    { // 1080p
-        printf("glVertex3f hooked: x=%f, y=%f, z=%f, addr: %p\n", x, y, z, addr);
-        x -= 350;
-        y += 150;
-    }
-    glad_glVertex3f(x, y, z);
-}
-
 void outrunLensFlareFix()
 {
     float scaleX = (float)gWidth / 800.0f;
@@ -1896,6 +2419,11 @@ int initResolutionPatches()
 {
     int numDisplays;
     SDL_DisplayID *sdlDisplayId = SDL_GetDisplays(&numDisplays);
+
+    // We respect the After Burner Climax cabinet's original 4:3 aspect ratio if the user requests it
+    if (gGrp == GROUP_ABC && getConfig()->keepAspectRatio)
+        gWidth = gHeight * 4 / 3;
+
     switch (gId)
     {
         case AFTER_BURNER_CLIMAX_SBLR:
@@ -1938,13 +2466,14 @@ int initResolutionPatches()
         {
             if (gWidth == 640 && gHeight == 480)
                 break;
+
             setVariable(0x082C0AE8, gWidth);
             setVariable(0x082C0AEC, gHeight);
             float newFontScale = gHeight / 480.0;
             unsigned int *newFontScalePtr = (unsigned int *)&newFontScale;
             setVariable(0x0806cd72, *newFontScalePtr);
-            // abcDrawSpriteCAVEAddress = (void *)0x08076a28 + 6;
-            // detourFunction(0x08076a28, abcDrawSprite);
+            abcDrawSpriteCAVEAddress = (void *)0x08076a28 + 6;
+            detourFunction(0x08076a28, abcDrawSprite);
 
             abcDrawSpriteOri = (void (*)(void *))trampolineHook((void *)0x08076a28, abcDrawSprite, 6);
 
@@ -2026,10 +2555,110 @@ int initResolutionPatches()
         break;
         case GHOST_SQUAD_EVOLUTION_SBNJ:
         {
-            // test
-            // patchMemory(0x081c1d71, "38303078363030");
-            setVariable(0x082c87f8, 0x00000550);
-            setVariable(0x082c87fc, 0x00000300);
+            // KEEP_ASPECT_RATIO: narrowing gWidth is enough, every patch and hook below derives
+            // from it, so the projection stays 4:3 and blitStretch() pillarboxes. Same as LGJ-SP.
+            if (getConfig()->keepAspectRatio)
+                gWidth = gHeight * 4 / 3;
+
+            if (gWidth == 640 && gHeight == 480)
+                break;
+
+            // s_ConstTextureParam @ 0x081dbc80: 19 render targets, 0x1c bytes each, [+0] w [+4] h.
+            setVariable(0x081dbc80, gWidth); // slot 0, screen colour
+            setVariable(0x081dbc84, gHeight);
+            setVariable(0x081dbc9c, gWidth); // slot 1, depth/stencil
+            setVariable(0x081dbca0, gHeight);
+
+            // The night-vision effect's vertical resolution is just how many lines
+            // ctrl_filter_scanline() emits. Its array holds (0xd3c8 - 0x1c8) / 0x38 = 960 entries,
+            // and the count field sits right after it, so 960 is a hard ceiling.
+            gsevoScanLines = gHeight < 960 ? gHeight : 960;
+            if (gsevoScanLines < 480)
+                gsevoScanLines = 480;
+            if (gsevoScanLines != 480)
+            {
+                setVariable(0x080da850, (size_t)(gsevoScanLines - 1)); // cmp bound, stock 479
+                setVariable(0x080da87b, (size_t)gsevoScanLines);       // stored count, stock 480
+            }
+
+            // ev_hologram_init()'s buffer, stock 640x480.
+            setVariable(0x080e7320, gWidth);
+            setVariable(0x080e7318, gHeight);
+
+            // Bloom downsample chain, slots 3-8: keep the /2 .. /16 ratio or the blur and
+            // night-vision passes sample outside their buffers and crop.
+            setVariable(0x081dbcd4, gWidth / 2);
+            setVariable(0x081dbcd8, gHeight / 2);
+            setVariable(0x081dbcf0, gWidth / 4);
+            setVariable(0x081dbcf4, gHeight / 4);
+            setVariable(0x081dbd0c, gWidth / 4);
+            setVariable(0x081dbd10, gHeight / 4);
+            setVariable(0x081dbd28, gWidth / 8);
+            setVariable(0x081dbd2c, gHeight / 8);
+            setVariable(0x081dbd44, gWidth / 8);
+            setVariable(0x081dbd48, gHeight / 8);
+            setVariable(0x081dbd60, gWidth / 16);
+            setVariable(0x081dbd64, gHeight / 16);
+
+            // The costume-screen portrait: ev_disp_custom_rob() renders the model into slot 2,
+            // copy_rect()s a 100x250 crop out of its centre, and draws that as a 100x250 sprite -
+            // so the portrait is only ever 100x250 pixels and is magnified on a larger screen.
+            // Scale the whole chain by the same factor the sprite ortho is; gsevoPutPortraitSprite()
+            // then divides the sprite back down so the on-screen framing is unchanged.
+            gsevoPortraitW = 100 * gWidth / 640;
+            gsevoPortraitH = 250 * gHeight / 480;
+            setVariable(0x081dbcb8, gWidth); // slot 2, the model's render target
+            setVariable(0x081dbcbc, gHeight);
+            float cropX = gWidth / 2.0f; // copy_rect centre, stock 320.0f / 240.0f
+            float cropY = gHeight / 2.0f;
+            unsigned int *cropXPtr = (unsigned int *)&cropX;
+            unsigned int *cropYPtr = (unsigned int *)&cropY;
+            setVariable(0x08083ca0, *cropXPtr);
+            setVariable(0x08083cab, *cropYPtr);
+            setVariable(0x080838a5, (size_t)gsevoPortraitW); // GLCreateTexture args, stock 100x250
+            setVariable(0x0808389d, (size_t)gsevoPortraitH);
+            setVariable(0x08083d02, (size_t)gsevoPortraitW); // sprite rect, same stock values
+            setVariable(0x08083d09, (size_t)gsevoPortraitH);
+            replaceCallAtAddress(0x08083d43, gsevoPutPortraitSprite);
+            replaceCallAtAddress(0x08083d76, gsevoPutPortraitSprite);
+
+            // Slot 18 is g_pBackScreen, which GLSetRenderTarget() substitutes for "the screen" and
+            // takes glViewport from - left at 640x480 it clips every draw into the corner.
+            setVariable(0x081dbe78, gWidth);
+            setVariable(0x081dbe7c, gHeight);
+
+            // s_BackRenderTarget: immediates in GLInitConstTexture()'s tail, not the table above.
+            setVariable(0x08176ceb, gWidth);
+            setVariable(0x08176ce3, gHeight);
+            setVariable(0x08176d06, gWidth);
+            setVariable(0x08176d10, gHeight);
+
+            // glviewport_640x480 @ 0x082c87f0 = {x, y, w, h}, read by init_viewport().
+            setVariable(0x082c87f8, gWidth);
+            setVariable(0x082c87fc, gHeight);
+
+            // GLFlip()'s present quad: these two floats are its vertices and, because the texture
+            // is GL_TEXTURE_RECTANGLE, its pixel texcoords too - both must move with the target.
+            float quadW = (float)gWidth;
+            float quadH = (float)gHeight;
+            unsigned int *quadWPtr = (unsigned int *)&quadW;
+            unsigned int *quadHPtr = (unsigned int *)&quadH;
+            setVariable(0x081787be, *quadWPtr); // mov esi, 640.0f
+            setVariable(0x081787b5, *quadHPtr); // mov edi, 480.0f
+
+            // The 2D ortho doubles stay at 640x480 so the HUD still fills the screen; these hooks
+            // swap them for the passes that need the render size.
+            gsevoGLFlipOri = (void (*)(void))trampolineHook((void *)0x08178670, gsevoGLFlip, 6);
+            gsevoBeginDraw2DFlipYOri = (void (*)(void))trampolineHook((void *)0x080a1c4c, gsevoBeginDraw2DFlipY, 6);
+            gsevoDrawEffectLinesOri =
+                (void(__attribute__((regparm(3))) *)(void *, void *, int))trampolineHook((void *)0x080dc3e2, gsevoDrawEffectLines, 6);
+
+            // The projection never reads the viewport - both call sites pass a hardcoded 4:3 to
+            // D3DXMatrixPerspectiveFovRH(). The vertical FOV is left alone, so the view widens.
+            float newAspect = (float)gWidth / (float)gHeight;
+            unsigned int *newAspectPtr = (unsigned int *)&newAspect;
+            setVariable(0x0806ebb8, *newAspectPtr); // calc_camera_matrix
+            setVariable(0x0806ecf5, *newAspectPtr); // set_camera_transform
         }
         break;
         case HARLEY_DAVIDSON_SBRG:
@@ -2064,19 +2693,15 @@ int initResolutionPatches()
             unsigned int idx = ((21 * h) / 768) + 1;
             setVariable(0x082a250e, idx);
 
-            // replaceCallAtAddress(0x080f1c1a, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1c6c, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1b27, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1b69, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1c93, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1e58, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1e5d, harleyReturnOne);
-            // replaceCallAtAddress(0x080f1e82, harleyReturnOne);
-
-            // replaceCallAtAddress(0x080f1eca, harleyTest1);
-            // replaceCallAtAddress(0x080c5d5f, harleyTest2);
-            // patchMemory(0x080c5dc8, "909090909090");
+            harleyScreenW = (float)w;
+            harleyScreenH = (float)h;
+            replaceCallAtAddress(0x080f295a, harleyMarkerUpdate);
+            replaceCallAtAddress(0x080f1eca, harleyMarkerProject);
             detourFunction(0x0804c700, glVertex3fHarley);
+            detourFunction(0x0804c9c0, glVertex3fvHarley);
+            detourFunction(0x0804d300, glClearHarley);
+            detourFunction(0x0804c8d0, glMatrixModeHarley);
+            detourFunction(0x0804ccc0, glLoadMatrixfHarley);
             detourFunction(0x0804d220, myGlBindTexture);
         }
         break;
@@ -3219,6 +3844,10 @@ int initResolutionPatches()
                 }
                 break;
             }
+
+            phYWin = gHeight - (phY + phH);
+            phY2Win = gHeight - (phY2 + phH2);
+
             setVariable(0x0805b104, phX);  // X 1st screen
             setVariable(0x0805b0fd, phY);  // Y 1st screen
             setVariable(0x0805b0f5, phW);  // Width 1st screen
@@ -3326,6 +3955,12 @@ int initResolutionPatches()
         {
             if (gWidth == 640 && gHeight == 480)
                 break;
+
+            // CProcessMain::Init() unconditionally clears klCRender+0x121, which makes the post
+            // effect passes render their scratch into the back buffer and glCopyTex it back. That
+            // is invisible at 640x480 but leaves debris in the corner once the scene is stretched,
+            // so re-enable the engine's own render buffer path.
+            patchMemoryFromString(0x08299a1d, "01");
             if (getConfig()->keepAspectRatio)
             {
                 srtvX = (gWidth - (gHeight / 3) * 4) / 2;
@@ -3353,9 +3988,6 @@ int initResolutionPatches()
                 break;
             }
             patchMemoryFromString(0x0804d142, "9090909090"); // setresolutiontype
-            // patchMemory(0x084c9dbc, "0005");
-            // patchMemory(0x08448458, "0005");
-            // patchMemory(0x0844845c, "0003");
             setVariable(0x084c9dbc, gWidth);
             setVariable(0x08448458, gWidth);
             setVariable(0x0844845c, gHeight);
@@ -3369,6 +4001,12 @@ int initResolutionPatches()
             setVariable(0x0844833c, gHeight);
             detourFunction(0x0804c024, glVertex3fHOD4);
             detourFunction(0x0804ca54, myGlBindTexture);
+
+            // SpkPrimitiveDrawTexturePolygonStrip2D, both halves - draws the caption cards
+            hod4SpkTexPolyLo = 0x0825e228;
+            hod4SpkTexPolyHi = 0x0825f26c;
+            hod4SpkStripOriginal = (void (*)(float *, unsigned int, void *))0x0825e228;
+            replaceCallAtAddress(0x0826f56a, hod4SpkTexPolyStrip2D);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVB:
@@ -3399,6 +4037,12 @@ int initResolutionPatches()
             setVariable(0x08442ffc, gHeight);
             detourFunction(0x0804c014, glVertex3fHOD4);
             detourFunction(0x0804ca84, myGlBindTexture);
+
+            // SpkPrimitiveDrawTexturePolygonStrip2D, both halves - draws the caption cards
+            hod4SpkTexPolyLo = 0x08258bb0;
+            hod4SpkTexPolyHi = 0x08259bf4;
+            hod4SpkStripOriginal = (void (*)(float *, unsigned int, void *))0x08258bb0;
+            replaceCallAtAddress(0x08269ef2, hod4SpkTexPolyStrip2D);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SBLC_REVC:
@@ -3429,6 +4073,12 @@ int initResolutionPatches()
             setVariable(0x08442ffc, gHeight);
             detourFunction(0x0804c014, glVertex3fHOD4);
             detourFunction(0x0804ca84, myGlBindTexture);
+
+            // SpkPrimitiveDrawTexturePolygonStrip2D, both halves - draws the caption cards
+            hod4SpkTexPolyLo = 0x08258bb0;
+            hod4SpkTexPolyHi = 0x08259bf4;
+            hod4SpkStripOriginal = (void (*)(float *, unsigned int, void *))0x08258bb0;
+            replaceCallAtAddress(0x08269ef2, hod4SpkTexPolyStrip2D);
         }
         break;
         case THE_HOUSE_OF_THE_DEAD_4_SPECIAL_SBLS:
@@ -3562,7 +4212,16 @@ int initResolutionPatches()
                 break;
             patchMemoryFromString(0x080548c4, "01");         // Enable Anti Alias
             patchMemoryFromString(0x080556e6, "b80a000000"); // Skips resolution set by the Dip Switches.
-            vf5FSwidth = (gHeight * 5) / 3;
+            printf("Mode: %d\n", getConfig()->vf5CabinetMode);
+            if (getConfig()->vf5CabinetMode == TERMINAL)
+            {
+                vf5FSwidth = (gHeight * 4) / 3;
+                printf("VF5 FS Terminal Mode width: %d height: %d\n", vf5FSwidth, gHeight);
+            }
+            else
+            {
+                vf5FSwidth = (gHeight * 5) / 3;
+            }
             setVariable(0x088d2b78, vf5FSwidth);
             setVariable(0x088d2b7c, gHeight);
             setVariable(0x088d2b8c, gWidth);
@@ -3575,7 +4234,16 @@ int initResolutionPatches()
                 break;
             patchMemoryFromString(0x08054bfe, "01");         // Enable Anti Alias
             patchMemoryFromString(0x08055a20, "b80a000000"); // Skips resolution set by the Dip Switches.
-            vf5FSwidth = (gHeight * 5) / 3;
+            if (getConfig()->vf5CabinetMode == TERMINAL)
+            {
+                vf5FSwidth = (gHeight * 4) / 3;
+                printf("Terminal Mode\n");
+            }
+            else
+            {
+                vf5FSwidth = (gHeight * 5) / 3;
+                printf("No Terminal Mode\n");
+            }
             setVariable(0x088d53d8, vf5FSwidth);
             setVariable(0x088d53dc, gHeight);
             setVariable(0x088d53ec, gWidth);

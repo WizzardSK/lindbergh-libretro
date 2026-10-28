@@ -9,6 +9,8 @@ extern SearchReplace gsevoElfMesa[];
 extern int gsevoElfCountMesa;
 extern SearchReplace gsevoSet1[];
 extern int gsevoSetCount1;
+extern SearchReplace gsevoIntelFs[];
+extern int gsevoIntelFsCount;
 extern ShaderFilesToPatch gsevoMesaShaderPatches[];
 extern ShaderFilesToPatch gsevoNvidiaShaderPatches[];
 extern int gsevoShaderPatchesCount;

@@ -35,7 +35,7 @@ int getGPUVendorID()
 {
     int vendorId;
     EmulatorConfig *config = getConfig();
-    
+
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
         fprintf(stderr, "SDL could not initialize! SDL_Error: %s\n", SDL_GetError());

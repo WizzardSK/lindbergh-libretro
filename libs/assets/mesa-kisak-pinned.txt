@@ -1,0 +1,62 @@
+# Pinned 32-bit mesa/vulkan stack bundled into the AppImage.
+#
+# Source:    ppa:kisak/turtle on Ubuntu 22.04 (jammy)
+# Captured:  2026-09-20
+# Consumed:  scripts/appimage/install-mesa.sh unpacks these over /usr at build
+#            time, so make-appimage.sh finds them at their normal system paths.
+#
+# WHY THESE PACKAGES
+#   mesa-libgallium      The actual driver. In mesa 25 libgl1-mesa-dri is only
+#                        an ~83 kB stub holding libdril_dri.so; omitting this
+#                        builds an AppImage that renders nothing.
+#   libgl1-mesa-dri      The libdril_dri.so DRI loader stub itself. Declares an
+#                        EXACT-version dependency on libgbm1, so the two must
+#                        be pinned together.
+#   libgbm1              libdril_dri.so links libgbm.so.1, which reaches
+#                        gallium. Part of the same version-locked set.
+#   libglx-mesa0         libGLX_mesa.so.0, listed in make-appimage.sh ADDED_LIBS.
+#   libegl-mesa0         EGL counterpart, pulled in alongside gbm.
+#   mesa-vulkan-drivers  libvulkan_*.so plus /usr/share/vulkan/icd.d manifests,
+#                        both copied by make-appimage.sh.
+#   libdrm-common        Architecture: all. Ships /usr/share/libdrm/*.ids, read
+#                        by the amdgpu driver at runtime.
+#   libdrm2, libdrm-*    Version-matched to the gallium build.
+#   libgl1-mesa-dev      GL headers, used when build-deps.sh compiles SDL3.
+#   libvdpau1            Upgraded by the same kisak set; kept for fidelity.
+#
+# NOT PINNED, ON PURPOSE
+#   libllvm15            kisak ships 1:15.0.7-10~kisak1~j, but gallium only
+#                        needs the libLLVM-15.so.1 soname and stock jammy
+#                        provides the same upstream 15.0.7. Using stock saves
+#                        ~28 MB of permanent git history. The kisak .deb is
+#                        archived outside the repo at
+#                        ~/linuxloader-pinned-deps/ in case it is ever needed.
+#   libglapi-mesa        mesa 25 dropped it, but make-appimage.sh still lists
+#                        libglapi.so.0. The stock jammy copy installed by
+#                        install-packages.sh satisfies that.
+#
+# TO REGENERATE
+#   On Ubuntu 22.04 with i386 multilib enabled:
+#     sudo dpkg --add-architecture i386
+#     sudo add-apt-repository -y ppa:kisak/turtle
+#     sudo apt update
+#     apt-get download <every package listed below, with its :i386 suffix;
+#                       libdrm-common has no suffix, it is Architecture: all>
+#     tar -cf mesa-kisak-pinned.tar *.deb
+#   install-mesa.sh rejects a tarball that is not i386 or is missing
+#   mesa-libgallium, so a bad capture fails the build rather than shipping.
+
+libdrm2                  2.4.122-1~kisak1~j               i386
+libdrm-amdgpu1           2.4.122-1~kisak1~j               i386
+libdrm-common            2.4.122-1~kisak1~j               all
+libdrm-intel1            2.4.122-1~kisak1~j               i386
+libdrm-nouveau2          2.4.122-1~kisak1~j               i386
+libdrm-radeon1           2.4.122-1~kisak1~j               i386
+libegl-mesa0             25.0.7~kisak3~j                  i386
+libgbm1                  25.0.7~kisak3~j                  i386
+libgl1-mesa-dev          25.0.7~kisak3~j                  i386
+libgl1-mesa-dri          25.0.7~kisak3~j                  i386
+libglx-mesa0             25.0.7~kisak3~j                  i386
+libvdpau1                1.5-2~kisak~j                    i386
+mesa-libgallium          25.0.7~kisak3~j                  i386
+mesa-vulkan-drivers      25.0.7~kisak3~j                  i386

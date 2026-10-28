@@ -45,10 +45,13 @@ LONG CALLBACK myVectoredHandler(PEXCEPTION_POINTERS ExceptionInfo)
     DWORD exceptionCode = ExceptionInfo->ExceptionRecord->ExceptionCode;
     PCONTEXT ctx = ExceptionInfo->ContextRecord;
 
-    if (exceptionCode == EXCEPTION_ACCESS_VIOLATION || exceptionCode == EXCEPTION_PRIV_INSTRUCTION) {
-        uint8_t* pint = (uint8_t*)ctx->Eip;
-        if (pint && !IsBadReadPtr(pint, 2) && pint[0] == 0xCD && pint[1] == 0x80) {        
-            if (ctx->Eax == 0xE0) { 
+    if (exceptionCode == EXCEPTION_ACCESS_VIOLATION || exceptionCode == EXCEPTION_PRIV_INSTRUCTION)
+    {
+        uint8_t *pint = (uint8_t *)ctx->Eip;
+        if (pint && !IsBadReadPtr(pint, 2) && pint[0] == 0xCD && pint[1] == 0x80)
+        {
+            if (ctx->Eax == 0xE0)
+            {
                 ctx->Eax = (DWORD)PthreadEmu::pthreadSelf();
                 ctx->Eip += 2;
                 return EXCEPTION_CONTINUE_EXECUTION;
@@ -57,7 +60,7 @@ LONG CALLBACK myVectoredHandler(PEXCEPTION_POINTERS ExceptionInfo)
     }
 
     return EXCEPTION_CONTINUE_SEARCH;
-}   
+}
 
 void initBridges()
 {
@@ -138,7 +141,7 @@ int main(int argc, char *argv[], char *envp[])
 
     initConfig(configPath);
 
-    if (partialElfCrc == PRIMEVAL_HUNT_SBPP && getConfig()->phUseZink)
+    if (false) // Removed for PH as the game is fixed now.
     {
         SymbolResolver::GetInstance().AddDllSearchSubPath("zink");
         SetEnvironmentVariableA("GALLIUM_DRIVER", "zink");
