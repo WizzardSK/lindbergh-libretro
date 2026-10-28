@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- RetroArch's pause holds the game still: once the core has not run for longer than a frame takes, the game's wall clock (`gettimeofday`, `time`, `clock_gettime(CLOCK_REALTIME)`) stops and its sound is not handed on, so Initial D 4 no longer jumps ahead by the paused time and Too Spicy's sound no longer plays on (NNshi).
 - Debug: KEEP_ASPECT_RATIO (Default On), which since the upstream merge also makes After Burner Climax and Ghost Squad Evolution render 4:3, as their cabinets were; Off gives widescreen back (NNshi).
 - No sound in any game since the new HUMMER_FLICKER_FIX and PRIMEVAL_HUNT_SCREEN_MODE defaults: setting them asked the loader too early whether it runs for the core, which on Windows hooks SDL's audio before MinHook was set up, so the hook was never made (NNshi).
 - Primeval Hunt's sound: it plays through ALSA (the loader's alsa2sdl), not FAudio, and its SDL device had no post-mix hook, so nothing reached the core. Only Primeval Hunt's ALSA device goes to the core: OutRun 2, Virtua Tennis 3 and Virtua Fighter 5 open ALSA beside FAudio and went silent with theirs too (NNshi).

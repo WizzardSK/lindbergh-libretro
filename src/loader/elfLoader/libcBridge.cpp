@@ -37,6 +37,9 @@ extern "C"
     double __strtod_internal(const char *nptr, char **endptr, int group);
     long int __strtol_internal(const char *nptr, char **endptr, int base, int group);
     unsigned long int __strtoul_internal(const char *nptr, char **endptr, int base, int group);
+
+    // the libretro core's pauses, which the game's clock is held back by (libretroBridge.c)
+    int64_t libretroPausedUs(void);
 }
 
 namespace LibcBridge
@@ -795,7 +798,7 @@ namespace LibcBridge
     int32_t bridgeTime(int32_t *tloc)
     {
         log_trace("Intercepted time");
-        time_t t = time(NULL);
+        time_t t = time(NULL) - (time_t)(libretroPausedUs() / 1000000);
         if (tloc)
         {
             *tloc = (int32_t)t;
@@ -821,6 +824,8 @@ namespace LibcBridge
             unsigned __int64 t = (unsigned __int64)ft.dwHighDateTime << 32 | ft.dwLowDateTime;
             t -= 116444736000000000ULL;
             t /= 10;
+            // the libretro core's pauses held back (libretroBridge.c)
+            t -= (unsigned __int64)libretroPausedUs();
             tv->tv_sec = (int32_t)(t / 1000000);
             tv->tv_usec = (int32_t)(t % 1000000);
         }
@@ -930,6 +935,7 @@ namespace LibcBridge
             unsigned __int64 t = (unsigned __int64)ft.dwHighDateTime << 32 | ft.dwLowDateTime;
             t -= 116444736000000000ULL;
             t /= 10;
+            t -= (unsigned __int64)libretroPausedUs();
             tp->tv_sec = (long)(t / 1000000);
             tp->tv_nsec = (long)(t % 1000000) * 1000;
             return 0;

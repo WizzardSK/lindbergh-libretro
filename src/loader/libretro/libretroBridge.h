@@ -20,5 +20,8 @@ void libretroRumble(float left, float right, int duration_ms);
 // The games that play through ALSA (alsa2sdl.c) open their SDL device
 // directly, not by SDL_OpenAudioDeviceStream as FAudio does
 void libretroAttachAudioDevice(uint32_t dev);
+/* How far the game's clocks are behind the real ones, in microseconds, for
+ * RetroArch's pauses (libretroFrame) */
+int64_t libretroPausedUs(void);
 
 #endif

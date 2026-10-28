@@ -26,6 +26,9 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+#include <time.h>
 #endif
 
 #ifndef __i386__
@@ -57,6 +60,141 @@ static uint32_t lastButtons[LR_PLAYERS];
 static uint32_t lastPointerButtons;
 static uint32_t lastPointerX = UINT32_MAX, lastPointerY = UINT32_MAX;
 static uint32_t *rowBuffer;
+
+/* RetroArch's pause, as the game sees it (NNshi): while the core is not
+ * run for longer than a frame takes, the game's wall clock stands still and
+ * its sound is not handed on, so a game that keeps time by the clock
+ * (Initial D 4) does not jump ahead on resuming and one whose sound thread
+ * runs on (Too Spicy) is quiet. The pauses so far and the start of the one
+ * going on, on a monotonic clock, in seconds and microseconds, without
+ * 64-bit division: the 32-bit build has no libgcc for it. Under pauseLock. */
+#define LR_PAUSE_AFTER_US 50000
+static int32_t pausedSec, pausedUsec, pauseStartSec, pauseStartUsec;
+static int pausing, pauseLock;
+
+static void monoNow(int32_t *sec, int32_t *usec)
+{
+#ifdef _WIN32
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    *sec = (int32_t)(c.QuadPart / f.QuadPart);
+    *usec = (int32_t)(c.QuadPart % f.QuadPart * 1000000 / f.QuadPart);
+#else
+    struct timespec ts;
+    syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &ts);
+    *sec = (int32_t)ts.tv_sec;
+    *usec = (int32_t)(ts.tv_nsec / 1000);
+#endif
+}
+
+static void pauseLockTake(void)
+{
+    while (__atomic_exchange_n(&pauseLock, 1, __ATOMIC_ACQUIRE))
+        ;
+}
+
+static void pauseLockGive(void)
+{
+    __atomic_store_n(&pauseLock, 0, __ATOMIC_RELEASE);
+}
+
+/* How far the game's clock is behind the real one: the pauses so far and
+ * the one going on */
+void libretroPausedTime(int32_t *sec, int32_t *usec)
+{
+    *sec = *usec = 0;
+    if (!__atomic_load_n(&pausing, __ATOMIC_RELAXED) && !__atomic_load_n(&pausedSec, __ATOMIC_RELAXED) &&
+        !__atomic_load_n(&pausedUsec, __ATOMIC_RELAXED))
+        return;
+    pauseLockTake();
+    *sec = pausedSec;
+    *usec = pausedUsec;
+    if (pausing)
+    {
+        int32_t s, u;
+        monoNow(&s, &u);
+        *sec += s - pauseStartSec;
+        *usec += u - pauseStartUsec;
+    }
+    pauseLockGive();
+    while (*usec < 0)
+    {
+        *usec += 1000000;
+        (*sec)--;
+    }
+    while (*usec >= 1000000)
+    {
+        *usec -= 1000000;
+        (*sec)++;
+    }
+}
+
+int64_t libretroPausedUs(void)
+{
+    int32_t sec, usec;
+    libretroPausedTime(&sec, &usec);
+    return (int64_t)sec * 1000000 + usec;
+}
+
+static bool libretroPaused(void)
+{
+    return __atomic_load_n(&pausing, __ATOMIC_RELAXED) != 0;
+}
+
+#ifndef _WIN32
+/* The game's wall clock, which the games keep time by, held back by the
+ * pauses; on Windows the libc bridge does the same (libcBridge.cpp). The
+ * monotonic clock, which SDL's own timing reads, is left as it is. */
+int gettimeofday(struct timeval *tv, void *tz)
+{
+    static int (*real)(struct timeval *, void *);
+    if (!real)
+        real = (int (*)(struct timeval *, void *))dlsym(RTLD_NEXT, "gettimeofday");
+    const int r = real(tv, tz);
+    int32_t sec, usec;
+    if (r == 0 && tv && (libretroPausedTime(&sec, &usec), sec || usec))
+    {
+        tv->tv_sec -= sec;
+        tv->tv_usec -= usec;
+        if (tv->tv_usec < 0)
+        {
+            tv->tv_usec += 1000000;
+            tv->tv_sec--;
+        }
+    }
+    return r;
+}
+
+int clock_gettime(clockid_t clk, struct timespec *tp)
+{
+    static int (*real)(clockid_t, struct timespec *);
+    if (!real)
+        real = (int (*)(clockid_t, struct timespec *))dlsym(RTLD_NEXT, "clock_gettime");
+    const int r = real(clk, tp);
+    int32_t sec, usec;
+    if (r == 0 && tp && clk == CLOCK_REALTIME && (libretroPausedTime(&sec, &usec), sec || usec))
+    {
+        tp->tv_sec -= sec;
+        tp->tv_nsec -= usec * 1000;
+        if (tp->tv_nsec < 0)
+        {
+            tp->tv_nsec += 1000000000;
+            tp->tv_sec--;
+        }
+    }
+    return r;
+}
+
+time_t time(time_t *tloc)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    if (tloc)
+        *tloc = tv.tv_sec;
+    return tv.tv_sec;
+}
+#endif
 
 static void *mapShm(const char *name)
 {
@@ -306,12 +444,45 @@ void libretroFrame()
     copyFrame();
     shm->frame_seq++;
     lrWake(frameEvent, &shm->frame_seq);
-    /* the core's next run; it may sit in RetroArch's menu for a while */
+    /* the core's next run; it may sit in RetroArch's menu for a while,
+     * paused for the game once it is longer than a frame takes */
+    int32_t waitSec, waitUsec, nowSec, nowUsec;
+    monoNow(&waitSec, &waitUsec);
     while (shm->run_seq == lastRun)
     {
         if (shm->quit)
             _exit(0);
-        lrWait(runEvent, &shm->run_seq, lastRun, 200);
+        lrWait(runEvent, &shm->run_seq, lastRun, 20);
+        if (libretroPaused() || shm->run_seq != lastRun)
+            continue;
+        monoNow(&nowSec, &nowUsec);
+        if ((nowSec - waitSec) * 1000000 + (nowUsec - waitUsec) > LR_PAUSE_AFTER_US)
+        {
+            pauseLockTake();
+            pauseStartSec = nowSec;
+            pauseStartUsec = nowUsec;
+            pausing = 1;
+            pauseLockGive();
+        }
+    }
+    if (libretroPaused())
+    {
+        monoNow(&nowSec, &nowUsec);
+        pauseLockTake();
+        pausedSec += nowSec - pauseStartSec;
+        pausedUsec += nowUsec - pauseStartUsec;
+        while (pausedUsec < 0)
+        {
+            pausedUsec += 1000000;
+            pausedSec--;
+        }
+        while (pausedUsec >= 1000000)
+        {
+            pausedUsec -= 1000000;
+            pausedSec++;
+        }
+        pausing = 0;
+        pauseLockGive();
     }
     lastRun = shm->run_seq;
     if (shm->quit)
@@ -370,6 +541,11 @@ static void SDLCALL postmix(void *userdata, const SDL_AudioSpec *spec, float *bu
         return;
     const int channels = spec->channels;
     const int frames = buflen / (int)sizeof(float) / channels;
+    if (libretroPaused())
+    {
+        pace(frames, spec->freq);
+        return;
+    }
     shm->audio_rate = spec->freq;
     uint32_t write = shm->audio_write;
     for (int i = 0; i < frames; i++)
