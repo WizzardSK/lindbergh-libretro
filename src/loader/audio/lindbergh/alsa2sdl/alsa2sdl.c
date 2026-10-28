@@ -1,6 +1,13 @@
 #include <SDL3/SDL.h>
 #include <stdlib.h>
 #include "../../../log/log.h"
+#include "../../../config/config.h"
+#ifdef COMPILING_LINUXLOADER_ELF
+// The launcher executable runs no game: never for the libretro core
+#define libretroAttachAudioDevice(dev) ((void)(dev))
+#else
+#include "../../../libretro/libretroBridge.h"
+#endif
 
 #define SND_PCM_STREAM_PLAYBACK 0
 #define SND_PCM_STREAM_CAPTURE 1
@@ -54,6 +61,7 @@ typedef struct _snd_pcm_hw_params snd_pcm_hw_params_t;
 typedef struct _snd_pcm_sw_params snd_pcm_sw_params_t;
 
 static SDL_AudioDeviceID g_alsaDevice = 0;
+extern uint32_t gId;
 
 static void EnsureAudioInit()
 {
@@ -71,6 +79,11 @@ static void EnsureAudioInit()
         else
         {
             log_info("ALSA: Opened SDL audio device ID %u", g_alsaDevice);
+            // Primeval Hunt plays through ALSA alone and played nothing in the
+            // libretro core; the games that open ALSA beside FAudio went silent
+            // with their ALSA device fed to the core too (NNshi)
+            if (gId == PRIMEVAL_HUNT_SBPP)
+                libretroAttachAudioDevice(g_alsaDevice);
         }
     }
 }

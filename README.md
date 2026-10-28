@@ -29,14 +29,16 @@ Grouped into Video, Input, Audio and System, each with a tooltip; Steering Inner
 |---|---|---|
 | Test Mode | disabled, enabled: the game started in test mode, as the loader's `-t` does | at the next start of the content |
 | Resolution | native (the `linuxloader.ini`'s), 1280x720, 1920x1080, 2560x1440, 3840x2160, 5120x2880: the size the games the loader can patch render at; every frame goes through system memory to RetroArch, so the highest ones cost speed | at the next start of the content |
-| Pointer | lightgun, mouse: what aims in the gun games, RetroArch's light gun (trigger, reload and aux A as the buttons) or its pointer (the mouse's absolute position, or touch); the mouse's buttons fire with either | on the fly |
+| Gun Aim | stick, mouse: what aims in the gun games for both players. Analog Stick: each player's left stick or D-pad moves the aim, R2 fires, R reloads, L2 is the gun's button, L shakes the gun in The House of the Dead 4; Too Spicy: L2 reloads, L and R are the pedals; Ghost Squad Evolution: L2 Action, L Change; Primeval Hunt: L2 pumps. Mouse: RetroArch's light gun on each player's port, which follows the mouse; left button fires, right reloads, middle is the gun's button, off the picture reloads too; Ghost Squad Evolution: right Action, middle Change; The House of the Dead 4: right the gun's button, middle shakes; Too Spicy: middle the left pedal, right the right one; Primeval Hunt: middle pumps, the touch screen takes the clicks | on the fly |
+| Gun Pointer Sensitivity | 50 to 200% (100): how fast the sticks move the aim, as fast across as up and down; at 100% a full tilt crosses the picture's height in about a second | on the fly |
+| Crosshair | enabled, disabled: the gun games' crosshairs over the picture, blue for player 1, red for player 2 (shown once that player aims) | on the fly |
 | Free Play | default (the game's own setting), enabled, disabled: written to the game's EEPROM at start, as the `linuxloader.ini`'s `FREEPLAY` | at the next start of the content |
 | Steering Response | linear, logarithmic: the left stick's X on a curve with less of the turn around the centre and steeper towards the ends, as the Sega System 32 racers' dip switch has it | on the fly |
 | Steering Inner Zone | 5 to 50% (25): with logarithmic, the share of the turn at the centre | on the fly |
 | Force Feedback to Rumble | enabled, disabled: the drive board's force feedback as rumble on player 1's pad (OutRun 2 SP SDX; other games only with `EMULATE_DRIVEBOARD = 1`) | on the fly |
 | Steering Effect | cubic (strong), square (weak): with logarithmic, the outer part's curve | on the fly |
-| Debug | every `linuxloader.ini` setting the core does not otherwise cover (board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
-| Audio Thread | disabled, enabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; off by default, as it loses OutRun 2 SP's announcer | at the next start of the content |
+| Debug | every `linuxloader.ini` setting (the core's defaults differ in two: HUMMER_FLICKER_FIX on, PRIMEVAL_HUNT_SCREEN_MODE 1) the core does not otherwise cover (board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
+| Audio Thread | enabled, disabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; on by default, though it loses OutRun 2 SP's announcer | at the next start of the content |
 
 ## Controls
 
@@ -44,7 +46,8 @@ Without a `controls.ini`, the loader's defaults:
 
 - Pads: RetroArch's ports 1 and 2 are players 1 and 2; Start is start, Select a coin, L3 service and R3 test. The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
 - Keyboard: RetroArch's keyboard is the game's: 5 and 6 coin, 1 and 2 start, T test, S service, the arrows.
-- Light gun or mouse: the pointer, as the Pointer option says.
+- Guns: both players, by the Gun Aim option (the sticks by default). Every gun game needs its guns calibrated in the test menu (R3) before it plays right. Too Spicy's pedals are on the keyboard's left and right arrows as well.
+- Touch screens: RetroArch's light gun, which follows the mouse, or its pointer while touched; the mouse's buttons click.
 - Rumble: the drive board's force feedback, which the loader turns into left and right rumble, reaches player 1's pad (OutRun 2 SP; Initial D runs without the drive board's emulation, `EMULATE_DRIVEBOARD`).
 
 A `controls.ini` maps them as standalone, since RetroArch's pads reach the game as SDL gamepads; see the [Controls Guide](docs/Controls-Guide.md).

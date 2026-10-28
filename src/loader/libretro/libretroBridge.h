@@ -2,6 +2,7 @@
 #define LIBRETRO_BRIDGE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Whether the game runs for the libretro core (LINDBERGH_LIBRETRO_SHM);
  * first asked in init.c, after MinHook is set up and before its hooks are
@@ -16,5 +17,8 @@ void libretroPollInput();
 void libretroFrame();
 /* The drive board's force feedback to the core's rumble, 0..1 each */
 void libretroRumble(float left, float right, int duration_ms);
+// The games that play through ALSA (alsa2sdl.c) open their SDL device
+// directly, not by SDL_OpenAudioDeviceStream as FAudio does
+void libretroAttachAudioDevice(uint32_t dev);
 
 #endif

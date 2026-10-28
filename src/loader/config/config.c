@@ -163,6 +163,18 @@ void setDefaultValues(EmulatorConfig *cfg)
     cfg->fpsTarget = 60.0f;
     cfg->phScreenMode = 2;
     cfg->phTestScreenSingle = 1;
+    // For the libretro core: Hummer without the NVIDIA shaders' flicker (the
+    // switch only turns off #pragma optionNV, which other drivers ignore),
+    // and Primeval Hunt without the touch screen beside the picture (NNshi).
+    // The core's variable, not libretroMode(): its first call hooks SDL's
+    // audio on Windows, which before MinHook is set up (init.c) left every
+    // game silent
+    const char *libretroShm = getenv("LINDBERGH_LIBRETRO_SHM");
+    if (libretroShm && *libretroShm)
+    {
+        cfg->hummerFlickerFix = 1;
+        cfg->phScreenMode = 1;
+    }
     cfg->vf5CabinetMode = SATELLITE;
     cfg->disableBuiltinFont = 0;
     cfg->disableBuiltinLogos = 0;

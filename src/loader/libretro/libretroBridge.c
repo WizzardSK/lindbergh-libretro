@@ -38,6 +38,7 @@
 #include "../../libretro/libretro_ipc.h"
 #include "../../libretro/libretro_shm.h"
 #include "libretroBridge.h"
+#include "../input/sdlInput.h"
 #include "../log/log.h"
 
 extern SDL_Window *g_SdlWindow;
@@ -206,7 +207,26 @@ void libretroPollInput()
     int w = 0, h = 0;
     if (g_SdlWindow)
         SDL_GetWindowSize(g_SdlWindow, &w, &h);
-    if (shm->pointer_valid && w > 0 && h > 0)
+    /* a gun game: both players' aim and buttons straight to the game, and
+     * the pointer not as the mouse, which would aim player 1 too; Primeval
+     * Hunt's touch screen takes the pointer, where with Gun Aim on Mouse
+     * player 1's buttons touch rather than fire */
+    shm->gun_game = sdlInputGunGame();
+    if (shm->gun_game)
+    {
+        bool touching = false;
+        if (shm->gun_game == LR_GUNS_PRIMEVAL_HUNT && shm->pointer_valid && w > 0 && h > 0)
+            touching = sdlInputPhTouch((float)shm->pointer_x * w / 65536.0f, (float)shm->pointer_y * h / 65536.0f,
+                                       shm->pointer_buttons & 1) &&
+                       !shm->guns_stick;
+        for (int p = 0; p < LR_PLAYERS; p++)
+        {
+            const LrGun g = shm->guns[p];
+            sdlInputSetGun((JVSPlayer)(PLAYER_1 + p), g.x / 65535.0f, g.y / 65535.0f,
+                           p == 0 && touching ? 0 : g.buttons);
+        }
+    }
+    else if (shm->pointer_valid && w > 0 && h > 0)
     {
         float x = (float)shm->pointer_x * w / 65536.0f, y = (float)shm->pointer_y * h / 65536.0f;
         if (shm->pointer_x != lastPointerX || shm->pointer_y != lastPointerY)
@@ -375,11 +395,18 @@ static void SDLCALL postmix(void *userdata, const SDL_AudioSpec *spec, float *bu
     pace(frames, spec->freq);
 }
 
-static void attachPostmix(SDL_AudioStream *stream)
+/* The device the game's sound plays to: its mix goes to the core too */
+void libretroAttachAudioDevice(uint32_t dev)
 {
-    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(stream);
+    if (!libretroMode())
+        return;
     if (!SDL_SetAudioPostmixCallback(dev, postmix, NULL))
         log_error("libretro: no post-mix callback: %s\n", SDL_GetError());
+}
+
+static void attachPostmix(SDL_AudioStream *stream)
+{
+    libretroAttachAudioDevice(SDL_GetAudioStreamDevice(stream));
 }
 
 /* FAudio (libsegaapi) opens its stream here: the device it plays to gets

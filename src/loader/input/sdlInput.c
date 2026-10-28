@@ -27,6 +27,7 @@
 #include "../mainShared.h"
 #include "../graphics/overlayMsgs.h"
 #include "wiimoteEvdev.h"
+#include "../../libretro/libretro_shm.h"
 #ifdef COMPILING_LINUXLOADER_ELF
 // The launcher executable runs no game: never for the libretro core
 #define libretroMode() false
@@ -1514,6 +1515,118 @@ void addActionToDirtyList(JVSPlayer player, LogicalAction action)
     gChangedActions[gNumChangedActions++] = (ChangedAction){player, action};
 }
 
+/* Whether the game aims with guns, the libretro core's players aiming it
+ * (libretroBridge.c), and its layout (LR_GUNS_*), which says what the core's
+ * gun buttons are */
+int sdlInputGunGame(void)
+{
+    if (gameType != SHOOTING)
+        return LR_GUNS_NONE;
+    // the test program too, whose input test shows the pedals (NNshi)
+    if (gId == TOO_SPICY_SBMV || gId == TOO_SPICY_SBMV_TEST)
+        return LR_GUNS_TOO_SPICY;
+    if (gId == GHOST_SQUAD_EVOLUTION_SBNJ)
+        return LR_GUNS_GHOST_SQUAD;
+    if (gId == PRIMEVAL_HUNT_SBPP)
+        return LR_GUNS_PRIMEVAL_HUNT;
+    if (gGrp == GROUP_HOD4 || gGrp == GROUP_HOD4_TEST)
+        return LR_GUNS_HOTD4;
+    return LR_GUNS_STANDARD;
+}
+
+static void setGunButton(JVSPlayer player, LogicalAction action, bool down)
+{
+    if (gActionStates[player][action].isActive != down)
+    {
+        gActionStates[player][action].isActive = down;
+        addActionToDirtyList(player, action);
+    }
+}
+
+/* Primeval Hunt's gun aims across its gun screen alone, beside the touch
+ * screen: a place in the window to the gun's 0..1, as the mouse's */
+static void phGunPosition(float mX, float mY, float *posX, float *posY)
+{
+    float tX = mX, tY = mY;
+    blitWindowToRender(mX, mY, &tX, &tY);
+    int motX = tX, motY = tY;
+    phTouchScreenCursor(tX, tY, &motX, &motY);
+    /* phYWin, not phY: phY is the GL viewport offset (bottom-up), the mouse is top-down. */
+    int gunW = phW > 0 ? phW : renderWidth;
+    int gunH = phH > 0 ? phH : renderHeight;
+    *posX = ((float)(motX - phX) / (float)gunW);
+    *posY = ((float)(motY - phYWin) / (float)gunH);
+}
+
+/* Primeval Hunt's touch screen from the core's pointer, a place in the
+ * window and its left button: whether the place is on the touch screen,
+ * where the mouse's button touches rather than fires */
+bool sdlInputPhTouch(float mX, float mY, bool down)
+{
+    float tX = mX, tY = mY;
+    blitWindowToRender(mX, mY, &tX, &tY);
+    int x, y;
+    const bool inside = getConfig()->emulateTouchscreen && phIsInsideTouchScreen(tX, tY, &x, &y);
+    if (inside && down != (bool)phIsDragging)
+        phTouchClick(x, y, down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP);
+    else if (inside && down)
+        phTouchClick(x, y, SDL_EVENT_MOUSE_MOTION);
+    phIsDragging = inside && down;
+    return inside;
+}
+
+/* A gun player's aim, 0..1 across the picture, and its buttons (bit
+ * LR_GUN_*), as the mouse gives them: reload as well off the screen, where
+ * Rambo and Too Spicy want the aim at -1; Let's Go Jungle's gun reads both
+ * axes the other way round (NNshi); the shake builds up as fast shaking
+ * would (updateGunShake) */
+void sdlInputSetGun(JVSPlayer player, float x, float y, uint32_t buttons)
+{
+    const bool reload = buttons & (1u << LR_GUN_RELOAD);
+    if (gId == PRIMEVAL_HUNT_SBPP && g_SdlWindow)
+    {
+        int w = 0, h = 0;
+        SDL_GetWindowSize(g_SdlWindow, &w, &h);
+        phGunPosition(x * w, y * h, &x, &y);
+    }
+    if (gId == LETS_GO_JUNGLE_SBLU || gId == LETS_GO_JUNGLE_SBLU_REVA)
+    {
+        x = 1.0f - x;
+        y = 1.0f - y;
+    }
+    if (reload && (gId == RAMBO_SBQL || gId == RAMBO_SBSS_CHINA || gId == TOO_SPICY_SBMV))
+        x = y = -1;
+    ActionState *sx = &gActionStates[player][LA_GunX], *sy = &gActionStates[player][LA_GunY];
+    if (fabs(sx->analogValue - x) > 0.001f)
+    {
+        sx->analogValue = x;
+        addActionToDirtyList(player, LA_GunX);
+    }
+    if (fabs(sy->analogValue - y) > 0.001f)
+    {
+        sy->analogValue = y;
+        addActionToDirtyList(player, LA_GunY);
+    }
+    /* a button as the core's changes, so the keyboard's (Too Spicy's pedals
+     * on the arrows) are not let go of the next frame; Ghost Squad
+     * Evolution's Action is the gun's button 3 and Change its 4 (NNshi) */
+    const bool gsevo = gId == GHOST_SQUAD_EVOLUTION_SBNJ;
+    const LogicalAction actions[] = {
+        [LR_GUN_TRIGGER] = LA_Trigger,       [LR_GUN_RELOAD] = LA_Reload,         [LR_GUN_BUTTON] = LA_GunButton,
+        [LR_GUN_ACTION] = gsevo ? LA_GunButton : LA_ActionButton,
+        [LR_GUN_CHANGE] = gsevo ? LA_ActionButton : LA_ChangeButton,
+        [LR_GUN_PEDAL_LEFT] = LA_PedalLeft,
+        [LR_GUN_PEDAL_RIGHT] = LA_PedalRight,
+    };
+    static uint32_t last[MAX_ENTITIES];
+    for (unsigned i = 0; i < sizeof(actions) / sizeof(actions[0]); i++)
+        if ((buttons ^ last[player]) & (1u << i))
+            setGunButton(player, actions[i], buttons & (1u << i));
+    last[player] = buttons;
+    if ((buttons & (1u << LR_GUN_SHAKE)) && player <= PLAYER_2)
+        gShakeValue[player] += 40.0f;
+}
+
 void updateBindingState(ControlBinding *binding, bool isActive, float analogValue)
 {
     if (!binding || binding->type == INPUT_TYPE_NONE)
@@ -1939,14 +2052,7 @@ void processSdlEvent(const SDL_Event *e)
                 int x, y;
                 if (phIsDragging && phIsInsideTouchScreen(tX, tY, &x, &y))
                     phTouchClick(x, y, e->type);
-
-                int motX = tX, motY = tY;
-                phTouchScreenCursor(tX, tY, &motX, &motY);
-                /* phYWin, not phY: phY is the GL viewport offset (bottom-up), the mouse is top-down. */
-                int gunW = phW > 0 ? phW : renderWidth;
-                int gunH = phH > 0 ? phH : renderHeight;
-                posX = ((float)(motX - phX) / (float)gunW);
-                posY = ((float)(motY - phYWin) / (float)gunH);
+                phGunPosition(mX, mY, &posX, &posY);
             }
             else
             {

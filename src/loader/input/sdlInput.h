@@ -242,6 +242,9 @@ void getLogicalActionString(const ControlBinding *binding, char *out_str, size_t
 bool needsPlayer(LogicalAction action, const char *name);
 int listSdlControllers(void);
 void addActionToDirtyList(JVSPlayer player, LogicalAction action);
+int sdlInputGunGame(void);
+void sdlInputSetGun(JVSPlayer player, float x, float y, uint32_t buttons);
+bool sdlInputPhTouch(float mX, float mY, bool down);
 
 #ifdef __cplusplus
 }

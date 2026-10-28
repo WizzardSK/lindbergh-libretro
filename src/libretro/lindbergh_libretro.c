@@ -76,7 +76,11 @@ static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
  * core), where the loader keeps each game's EEPROM and SRAM by its DVP
  * (init.c); empty without one */
 static char s_saves[PATH_MAX];
-static bool pointer_lightgun = true;
+/* Input > Gun Aim: the sticks aim the gun games' players, or the mouse;
+ * Input > Gun Pointer Sensitivity, the sticks' speed; and Input > Crosshair */
+static bool gun_stick = true;
+static float gun_speed = 1.0f;
+static bool crosshair = true;
 /* The Steering Response option: the left stick's X on a curve, with its
  * Inner Zone (the share of the turn at the centre) and Effect (the power of
  * the outer part, 2 or 3) */
@@ -104,6 +108,7 @@ static const struct { const char *option, *section, *key; } debug_settings[] = {
     {"lindbergh_debug_debug_msgs", "System", "DEBUG_MSGS"},
     {"lindbergh_debug_use_alt_jvs_passthrough", "System", "USE_ALT_JVS_PASSTHROUGH"},
     {"lindbergh_debug_boost_render_res", "Display", "BOOST_RENDER_RES"},
+    {"lindbergh_debug_keep_aspect_ratio", "Display", "KEEP_ASPECT_RATIO"},
     {"lindbergh_debug_hummer_flicker_fix", "Graphics", "HUMMER_FLICKER_FIX"},
     {"lindbergh_debug_lgj_render_with_mesa", "Graphics", "LGJ_RENDER_WITH_MESA"},
     {"lindbergh_debug_disable_builtin_font", "Graphics", "DISABLE_BUILTIN_FONT"},
@@ -158,8 +163,12 @@ static bool update_option_display(void);
 static void read_options(void)
 {
     test_mode = !strcmp(get_option("lindbergh_test_mode", "disabled"), "enabled");
-    audio_thread = !strcmp(get_option("lindbergh_audio_thread", "disabled"), "enabled");
-    pointer_lightgun = !strcmp(get_option("lindbergh_pointer", "lightgun"), "lightgun");
+    audio_thread = strcmp(get_option("lindbergh_audio_thread", "enabled"), "disabled") != 0;
+    gun_stick = strcmp(get_option("lindbergh_gun_aim", "stick"), "mouse") != 0;
+    gun_speed = atoi(get_option("lindbergh_gun_sensitivity", "100")) / 100.0f;
+    if (gun_speed < 0.5f || gun_speed > 2.0f)
+        gun_speed = 1.0f;
+    crosshair = strcmp(get_option("lindbergh_crosshair", "enabled"), "disabled") != 0;
     steering_log = !strcmp(get_option("lindbergh_steering", "linear"), "logarithmic");
     ffb_rumble = strcmp(get_option("lindbergh_ffb_rumble", "enabled"), "disabled") != 0;
     steering_inner = atoi(get_option("lindbergh_steering_inner", "25")) / 100.0f;
@@ -189,7 +198,7 @@ static void read_options(void)
  * a frontend without it gets them as plain variables, built from these) */
 static struct retro_core_option_v2_category option_categories[] = {
     {"video", "Video", "The resolution the games render at."},
-    {"input", "Input", "The pointer, steering and force feedback."},
+    {"input", "Input", "The guns, steering and force feedback."},
     {"audio", "Audio", "How the sound reaches RetroArch."},
     {"system", "System", "Test mode and free play."},
     {"debug", "Debug (Restart)", "linuxloader.ini's settings. Default leaves the game's own or the linuxloader.ini's."},
@@ -202,11 +211,23 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      NULL, "video",
      {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
      "native"},
-    {"lindbergh_pointer", "Pointer", NULL,
-     "What aims in the gun games. Light Gun: RetroArch's light gun, its trigger, reload and aux A as the buttons. Mouse: RetroArch's pointer, the mouse's position or touch. The mouse's buttons fire with either.",
+    {"lindbergh_gun_aim", "Gun Aim", NULL,
+     "What aims in the gun games, for both players. Analog Stick: each player's left stick (or D-pad) moves the aim, R2 fires, R reloads, L2 is the gun's button, L shakes the gun in The House of the Dead 4. Too Spicy: L2 reloads, L and R are the pedals. Ghost Squad Evolution: L2 is Action, L is Change. Primeval Hunt: L2 pumps. Mouse: RetroArch's light gun on each player's port, which follows the mouse; left button fires, right reloads, middle is the gun's button, aiming off the picture reloads too. Ghost Squad Evolution: right is Action, middle is Change. The House of the Dead 4: right is the gun's button, middle shakes. Too Spicy: middle is the left pedal, right the right one. Primeval Hunt: middle pumps, and the touch screen takes the mouse's clicks.",
      NULL, "input",
-     {{"lightgun", "Light Gun"}, {"mouse", "Mouse"}, {NULL, NULL}},
-     "lightgun"},
+     {{"stick", "Analog Stick"}, {"mouse", "Mouse"}, {NULL, NULL}},
+     "stick"},
+    {"lindbergh_gun_sensitivity", "Gun Pointer Sensitivity", NULL,
+     "How fast the sticks move the aim with Gun Aim on Analog Stick, as fast across as up and down; at 100% a full tilt crosses the picture's height in about a second. The mouse aims where it points.",
+     NULL, "input",
+     {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"},
+      {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}, {"160", "160%"}, {"170", "170%"},
+      {"180", "180%"}, {"190", "190%"}, {"200", "200%"}, {NULL, NULL}},
+     "100"},
+    {"lindbergh_crosshair", "Crosshair", NULL,
+     "The gun games' crosshairs drawn over the picture: blue for player 1, red for player 2, which shows once that player aims.",
+     NULL, "input",
+     {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+     "enabled"},
     {"lindbergh_ffb_rumble", "Force Feedback to Rumble", NULL,
      "The drive board's force feedback as rumble on player 1's pad. Supported: OutRun 2 SP SDX (all revisions), the game the loader emulates the drive board for. Others only with EMULATE_DRIVEBOARD = 1 in their linuxloader.ini, if they drive that board (Initial D does not).",
      NULL, "input",
@@ -228,10 +249,10 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      {{"cubic", "Cubic (Strong)"}, {"square", "Square (Weak)"}, {NULL, NULL}},
      "cubic"},
     {"lindbergh_audio_thread", "Audio Thread (Restart)", NULL,
-     "Hands the sound to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames. Off by default: OutRun 2 SP's announcer is lost with it.",
+     "Hands the sound to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames. OutRun 2 SP's announcer is lost with it.",
      NULL, "audio",
-     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
-     "disabled"},
+     {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+     "enabled"},
     {"lindbergh_test_mode", "Test Mode (Restart)", NULL,
      "Starts the game in test mode, as the loader's -t does.",
      NULL, "system",
@@ -275,8 +296,13 @@ static struct retro_core_option_v2_definition option_definitions[] = {
     {"lindbergh_debug_boost_render_res", "BOOST_RENDER_RES", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
+    {"lindbergh_debug_keep_aspect_ratio", "KEEP_ASPECT_RATIO", NULL,
+     "On: After Burner Climax and Ghost Squad Evolution render 4:3, as their cabinets were. Off: widescreen.",
+     NULL, "debug",
+     {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
+     "default"},
     {"lindbergh_debug_hummer_flicker_fix", "HUMMER_FLICKER_FIX", NULL, NULL, NULL, "debug",
-     {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
+     {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_lgj_render_with_mesa", "LGJ_RENDER_WITH_MESA", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
@@ -309,7 +335,7 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_primeval_hunt_screen_mode", "PRIMEVAL_HUNT_SCREEN_MODE", NULL, NULL, NULL, "debug",
-     {{"default", "Default (2)"}, {"0", "0"}, {"1", "1"}, {"2", "2"}, {"3", "3"}, {NULL, NULL}},
+     {{"default", "Default (1)"}, {"0", "0"}, {"1", "1"}, {"2", "2"}, {"3", "3"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_primeval_hunt_test_screen_single", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
@@ -1044,6 +1070,208 @@ static int16_t trigger(unsigned port, unsigned id)
     return v;
 }
 
+/* The gun games' aim per player, 0..1 across the picture, kept from frame
+ * to frame for the sticks; and whether player 2 has aimed yet, its
+ * crosshair hidden until then so player 1 does not see a second one
+ * standing still */
+static float gun_pos[LR_PLAYERS][2] = {{0.5f, 0.5f}, {0.5f, 0.5f}};
+static bool gun_used[LR_PLAYERS];
+static bool gun_shown[LR_PLAYERS];
+
+/* The left stick moves the aim, past a small dead zone, as fast as it is
+ * pushed - squared, for fine aim near the centre - across the picture's
+ * height in about a second at full tilt times Gun Pointer Sensitivity, and
+ * across as fast, less of its width on a wide picture (NNshi); the D-pad at
+ * half that speed (as the xemu core's Chihiro guns) */
+static bool stick_aim(unsigned port)
+{
+    static const unsigned dpad[2][2] = {
+        {RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT},
+        {RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN},
+    };
+    const float across = frame_w && frame_h ? (float)frame_h / (float)frame_w : 1.0f;
+    bool moved = false;
+    for (int a = 0; a < 2; a++)
+    {
+        const float v = axis(port, RETRO_DEVICE_INDEX_ANALOG_LEFT, a ? RETRO_DEVICE_ID_ANALOG_Y : RETRO_DEVICE_ID_ANALOG_X) / 32767.0f;
+        float m = v < 0 ? -v : v, step = 0.0f;
+        if (m > 0.15f)
+        {
+            m = (m - 0.15f) / 0.85f;
+            step = v < 0 ? -m * m : m * m;
+        }
+        else if (input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, dpad[a][0]))
+            step = -0.5f;
+        else if (input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, dpad[a][1]))
+            step = 0.5f;
+        if (step != 0.0f)
+        {
+            float p = gun_pos[port][a] + step * gun_speed * (a ? 1.0f : across) / 60.0f;
+            gun_pos[port][a] = p < 0.0f ? 0.0f : p > 1.0f ? 1.0f : p;
+            moved = true;
+        }
+    }
+    return moved;
+}
+
+static bool lightgun(unsigned port, unsigned id)
+{
+    return input_state_cb(port, RETRO_DEVICE_LIGHTGUN, 0, id) != 0;
+}
+
+static bool pad_button(unsigned port, unsigned id)
+{
+    return input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, id) != 0;
+}
+
+/* A stick player's buttons in the game's layout (LR_GUNS_*, from the
+ * loader): R2 fires, R reloads and L2 is the gun's button, but Too Spicy's
+ * pedals on L and R with reload on L2, Ghost Squad Evolution's Action and
+ * Change on L2 and L, Primeval Hunt's pump on L2, and The House of the Dead
+ * 4's shake on L (NNshi) */
+static uint32_t stick_buttons(unsigned p, uint32_t layout)
+{
+    uint32_t b = 0;
+    if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_R2)) b |= 1u << LR_GUN_TRIGGER;
+    switch (layout)
+    {
+        case LR_GUNS_TOO_SPICY:
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L2)) b |= 1u << LR_GUN_RELOAD;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L)) b |= 1u << LR_GUN_PEDAL_LEFT;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_R)) b |= 1u << LR_GUN_PEDAL_RIGHT;
+            break;
+        case LR_GUNS_GHOST_SQUAD:
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_R)) b |= 1u << LR_GUN_RELOAD;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L2)) b |= 1u << LR_GUN_ACTION;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L)) b |= 1u << LR_GUN_CHANGE;
+            break;
+        default:
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_R)) b |= 1u << LR_GUN_RELOAD;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L2)) b |= 1u << LR_GUN_BUTTON;
+            if (pad_button(p, RETRO_DEVICE_ID_JOYPAD_L)) b |= 1u << LR_GUN_SHAKE;
+            break;
+    }
+    return b;
+}
+
+/* A mouse player's buttons in the game's layout: the left fires, the right
+ * reloads and the middle is the gun's button (Primeval Hunt's pump), but
+ * Ghost Squad Evolution's Action and Change on the right and middle, and
+ * The House of the Dead 4's gun button and shake, and Too Spicy's left and
+ * right pedals on the middle and right (NNshi); off the picture reloads
+ * (left, right, middle in bits 0..2) */
+static uint32_t mouse_buttons(uint32_t mouse, bool offscreen, uint32_t layout)
+{
+    uint32_t b = 0;
+    if (mouse & 1) b |= 1u << LR_GUN_TRIGGER;
+    if (offscreen) b |= 1u << LR_GUN_RELOAD;
+    switch (layout)
+    {
+        case LR_GUNS_GHOST_SQUAD:
+            if (mouse & 2) b |= 1u << LR_GUN_ACTION;
+            if (mouse & 4) b |= 1u << LR_GUN_CHANGE;
+            break;
+        case LR_GUNS_HOTD4:
+            if (mouse & 2) b |= 1u << LR_GUN_BUTTON;
+            if (mouse & 4) b |= 1u << LR_GUN_SHAKE;
+            break;
+        case LR_GUNS_TOO_SPICY:
+            /* the arrows are RetroArch's D-pad, which leaves the mouse for
+             * the pedals (NNshi) */
+            if (mouse & 4) b |= 1u << LR_GUN_PEDAL_LEFT;
+            if (mouse & 2) b |= 1u << LR_GUN_PEDAL_RIGHT;
+            break;
+        default:
+            if (mouse & 2) b |= 1u << LR_GUN_RELOAD;
+            if (mouse & 4) b |= 1u << LR_GUN_BUTTON;
+            break;
+    }
+    return b;
+}
+
+/* Both players' guns for the loader (libretroBridge.c), which hands them to
+ * a gun game; mouse is player 1's mouse buttons (bits 0..2), which aim with
+ * Gun Aim on Mouse along with port 1's light gun */
+static void write_guns(uint32_t mouse)
+{
+    static bool was_stick = true;
+    if (gun_stick != was_stick)
+    {
+        /* each crosshair from the centre, and player 2's hidden again, which
+         * the mouse left where player 1's is (NNshi) */
+        was_stick = gun_stick;
+        for (unsigned p = 0; p < LR_PLAYERS; p++)
+        {
+            gun_pos[p][0] = gun_pos[p][1] = 0.5f;
+            gun_used[p] = false;
+        }
+    }
+    const uint32_t layout = shm->gun_game;
+    shm->guns_stick = gun_stick;
+    for (unsigned p = 0; p < LR_PLAYERS; p++)
+    {
+        uint32_t b;
+        if (gun_stick)
+        {
+            gun_used[p] |= stick_aim(p);
+            b = stick_buttons(p, layout);
+        }
+        else
+        {
+            /* RetroArch gives every port the one mouse's place: port 2 aims
+             * only while it is somewhere else, else its crosshair covers
+             * player 1's */
+            const float x = (input_state_cb(p, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X) + 0x8000) / 65536.0f;
+            const float y = (input_state_cb(p, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y) + 0x8000) / 65536.0f;
+            if (p > 0)
+                gun_used[p] = x != gun_pos[0][0] || y != gun_pos[0][1];
+            gun_pos[p][0] = x;
+            gun_pos[p][1] = y;
+            uint32_t m = p == 0 ? mouse : 0;
+            if (lightgun(p, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER)) m |= 1;
+            if (lightgun(p, RETRO_DEVICE_ID_LIGHTGUN_RELOAD)) m |= 2;
+            if (lightgun(p, RETRO_DEVICE_ID_LIGHTGUN_AUX_A)) m |= 4;
+            b = mouse_buttons(m, lightgun(p, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN), layout);
+        }
+        if (b)
+            gun_used[p] = true;
+        gun_used[0] = true;
+        shm->guns[p].x = (uint32_t)(gun_pos[p][0] * 65535.0f);
+        shm->guns[p].y = (uint32_t)(gun_pos[p][1] * 65535.0f);
+        shm->guns[p].buttons = b;
+        gun_shown[p] = gun_used[p] && !(b & (1u << LR_GUN_RELOAD));
+    }
+}
+
+/* The crosshairs over a gun game's frame, as the xemu core's: a plus sign
+ * with a black outline, player 1 blue, player 2 red (NNshi). The frame is
+ * the loader's, the core's until the next run. */
+static void draw_crosshairs(uint32_t *pixels, unsigned w, unsigned h)
+{
+    static const uint32_t colors[3] = {0x000000, 0x298CFF, 0xFF2929};
+    int arm = (int)h / 40, thick = (int)h / 240;
+    arm = arm < 6 ? 6 : arm > 40 ? 40 : arm;
+    thick = thick < 2 ? 2 : thick > 6 ? 6 : thick;
+    for (int pass = 0; pass < 2; pass++)
+        for (unsigned p = 0; p < LR_PLAYERS; p++)
+        {
+            if (!gun_shown[p])
+                continue;
+            const int cx = (int)(gun_pos[p][0] * w), cy = (int)(gun_pos[p][1] * h);
+            const int edge = pass ? 0 : 1, len = arm + edge, t = thick / 2 + edge;
+            const uint32_t c = colors[pass ? 1 + p : 0];
+            for (int dy = -len; dy <= len; dy++)
+                for (int dx = -len; dx <= len; dx++)
+                {
+                    if (!((dx >= -t && dx <= t) || (dy >= -t && dy <= t)))
+                        continue;
+                    const int x = cx + dx, y = cy + dy;
+                    if (x >= 0 && y >= 0 && x < (int)w && y < (int)h)
+                        pixels[(size_t)y * w + x] = c;
+                }
+        }
+}
+
 static void write_input(void)
 {
     static const struct { unsigned retro, lr; } map[] = {
@@ -1074,22 +1302,17 @@ static void write_input(void)
         shm->pads[p] = pad;
     }
 
-    /* the pointer over the picture: RetroArch's light gun (which follows
-     * the mouse) or its pointer, -0x7fff..0x7fff across the content */
-    int16_t x, y;
+    /* the pointer over the picture, -0x7fff..0x7fff across the content:
+     * RetroArch's light gun, which follows the mouse, or its pointer while
+     * touched; its buttons the mouse's, or the touch as the left */
+    int16_t x = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+    int16_t y = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
     uint32_t b = 0;
-    if (pointer_lightgun)
-    {
-        x = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
-        y = input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
-        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER)) b |= 1;
-        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_RELOAD)) b |= 2;
-        if (input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A)) b |= 4;
-    }
-    else
+    if (input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED))
     {
         x = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X);
         y = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y);
+        b |= 1;
     }
     if (input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT)) b |= 1;
     if (input_state_cb(0, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT)) b |= 2;
@@ -1098,6 +1321,7 @@ static void write_input(void)
     shm->pointer_y = (uint32_t)((int32_t)y + 0x8000);
     shm->pointer_buttons = b;
     shm->pointer_valid = 1;
+    write_guns(b);
 }
 
 /* The ring keeps about this much in hand: SDL's device in the loader mixes
@@ -1293,6 +1517,8 @@ void retro_run(void)
                                                    (float)frame_w / (float)frame_h};
             environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &geometry);
         }
+        if (crosshair && shm->gun_game)
+            draw_crosshairs(shm->pixels, frame_w, frame_h);
         video_cb(shm->pixels, frame_w, frame_h, frame_w * 4);
     }
     else

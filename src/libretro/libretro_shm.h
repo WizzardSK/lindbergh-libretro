@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 #define LR_SHM_MAGIC 0x4C424C52u /* "RLBL" */
-#define LR_SHM_VERSION 3
+#define LR_SHM_VERSION 5
 
 #define LR_MAX_WIDTH 5120
 #define LR_MAX_HEIGHT 2880
@@ -54,6 +54,23 @@ typedef struct LrPad {
     int16_t axes[LR_AXES];       /* sticks -32768..32767, triggers 0..32767 */
 } LrPad;
 
+/* A gun player's aim, 0..65535 across the picture left to right and top to
+ * bottom, and its buttons (bit LR_GUN_*) */
+typedef struct LrGun {
+    uint32_t x, y;
+    uint32_t buttons;
+} LrGun;
+
+enum {
+    LR_GUN_TRIGGER, LR_GUN_RELOAD, LR_GUN_BUTTON,
+    LR_GUN_ACTION, LR_GUN_CHANGE,        /* Ghost Squad Evolution's */
+    LR_GUN_PEDAL_LEFT, LR_GUN_PEDAL_RIGHT, /* Too Spicy's */
+    LR_GUN_SHAKE,                        /* The House of the Dead 4's */
+};
+
+/* The gun games' layouts, which say what the core's buttons are */
+enum { LR_GUNS_NONE, LR_GUNS_STANDARD, LR_GUNS_TOO_SPICY, LR_GUNS_GHOST_SQUAD, LR_GUNS_PRIMEVAL_HUNT, LR_GUNS_HOTD4 };
+
 typedef struct LrKey {
     uint32_t scancode;           /* SDL_Scancode */
     uint32_t down;
@@ -71,6 +88,9 @@ typedef struct LrShm {
     uint32_t pointer_x, pointer_y;
     uint32_t pointer_buttons;    /* bit 0 left, 1 right, 2 middle */
     uint32_t pointer_valid;
+    /* the gun games' players, from the core's Gun Aim (sticks or mouse) */
+    LrGun guns[LR_PLAYERS];
+    uint32_t guns_stick;         /* Gun Aim on Analog Stick */
     volatile uint32_t key_head;  /* written by the core */
     volatile uint32_t key_tail;  /* written by the loader */
     LrKey keys[LR_KEY_QUEUE];
@@ -78,6 +98,9 @@ typedef struct LrShm {
     /* loader -> core */
     volatile uint32_t frame_seq; /* futex: a frame was handed over */
     volatile uint32_t loader_pid;
+    /* the game aims with guns (guns[] go to it), LR_GUNS_* by its
+     * buttons: the core draws the crosshairs */
+    volatile uint32_t gun_game;
     uint32_t width, height;      /* of the frame, pitch width * 4 */
     uint32_t audio_rate;
     volatile uint32_t audio_write; /* in frames, wraps at LR_AUDIO_FRAMES */
