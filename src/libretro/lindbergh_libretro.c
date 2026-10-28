@@ -812,10 +812,54 @@ static bool install_loader(const char *root)
 #endif
 }
 
+/* The separate test program of a game whose test menu is not in the game
+ * itself, which the loader's -t runs only for the names without an
+ * extension (mainShared.c, testModePath): OutRun 2 SP's JenTest in a
+ * JenTest folder beside Jennifer's, Virtua Tennis 3's vt3_testmode beside
+ * vt3_Lindbergh, with the extension the game has (".elf", NNshi) */
+static bool test_program(const char *elf, char *out, size_t size)
+{
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", elf);
+    char *slash = last_separator(dir);
+    if (!slash)
+        return false;
+    const char sep = *slash;
+    *slash = 0;
+    const char *base = slash + 1 - dir + elf;
+    const char *ext = strrchr(base, '.');
+    const size_t stem = ext ? (size_t)(ext - base) : strlen(base);
+    if (!ext)
+        ext = "";
+    if (stem == 8 && !strncmp(base, "Jennifer", 8))
+        snprintf(out, size, "%s%c..%cJenTest%cJenTest%s", dir, sep, sep, sep, ext);
+    else if (stem == 13 && !strncmp(base, "vt3_Lindbergh", 13))
+        snprintf(out, size, "%s%cvt3_testmode%s", dir, sep, ext);
+    else
+        return false;
+    return access(out, R_OK) == 0;
+}
+
 /* The loader started on the game of the content */
 static bool start_loader(void)
 {
     const char *elf = s_elf, *dir = s_dir, *root = s_root;
+    /* Test Mode: the separate test program where the game has one, or the
+     * game with the loader's -t */
+    char test_elf[PATH_MAX], test_dir[PATH_MAX];
+    bool test_flag = test_mode;
+    if (test_mode && test_program(s_elf, test_elf, sizeof(test_elf)))
+    {
+        /* run from its own folder, as the game from its */
+        snprintf(test_dir, sizeof(test_dir), "%s", test_elf);
+        char *cut = last_separator(test_dir);
+        if (cut)
+            *cut = 0;
+        elf = test_elf;
+        dir = test_dir;
+        test_flag = false;
+        lr_log(RETRO_LOG_INFO, "test mode: %s\n", test_elf);
+    }
 #ifdef _WIN32
     char exe[PATH_MAX];
     snprintf(exe, sizeof(exe), "%s\\linuxloader.exe", root);
@@ -838,7 +882,7 @@ static bool start_loader(void)
                                   FILE_ATTRIBUTE_NORMAL, NULL);
 
     char cmdline[PATH_MAX * 2 + 16];
-    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\"%s", exe, elf, test_mode ? " -t" : "");
+    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\"%s", exe, elf, test_flag ? " -t" : "");
     STARTUPINFOA si = {sizeof(si)};
     PROCESS_INFORMATION pi = {0};
     if (log_file != INVALID_HANDLE_VALUE)
@@ -937,12 +981,12 @@ static bool start_loader(void)
         setenv("LD_LIBRARY_PATH", libs, 1);
         setenv("BOX64_LD_LIBRARY_PATH", libs, 1);
         setenv("BOX64_LOG", "1", 0);
-        if (test_mode)
+        if (test_flag)
             execl(box64, box64, launcher, elf, "-t", (char *)NULL);
         else
             execl(box64, box64, launcher, elf, (char *)NULL);
 #else
-        if (test_mode)
+        if (test_flag)
             execl(apprun, apprun, elf, "-t", (char *)NULL);
         else
             execl(apprun, apprun, elf, (char *)NULL);

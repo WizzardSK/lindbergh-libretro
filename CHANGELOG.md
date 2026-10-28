@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Test Mode runs OutRun 2 SP SDX's and Virtua Tennis 3's separate test programs (JenTest in a JenTest folder beside Jennifer's, vt3_testmode beside vt3_Lindbergh), also when they are named with `.elf`; the loader's `-t` only knew them without an extension, so the games started as usual (NNshi).
 - RetroArch's pause holds the game still: once the core has not run for longer than a frame takes, the game's wall clock (`gettimeofday`, `time`, `clock_gettime(CLOCK_REALTIME)`) stops and its sound is not handed on, so Initial D 4 no longer jumps ahead by the paused time and Too Spicy's sound no longer plays on (NNshi).
 - Debug: KEEP_ASPECT_RATIO (Default On), which since the upstream merge also makes After Burner Climax and Ghost Squad Evolution render 4:3, as their cabinets were; Off gives widescreen back (NNshi).
 - No sound in any game since the new HUMMER_FLICKER_FIX and PRIMEVAL_HUNT_SCREEN_MODE defaults: setting them asked the loader too early whether it runs for the core, which on Windows hooks SDL's audio before MinHook was set up, so the hook was never made (NNshi).
