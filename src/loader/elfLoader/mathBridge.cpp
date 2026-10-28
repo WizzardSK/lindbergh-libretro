@@ -50,15 +50,26 @@ namespace MathBridge
         MAP("modff", bridge_modff);
         MAP("sqrt", bridge_sqrt);
         MAP("sqrtf", bridge_sqrtf);
-        MAP("div", bridge_div);
+        MAP("div", bridgeLdiv);
+        MAP("ldiv", bridgeLdiv);
         MAP("finitef", bridge_finitef);
         MAP("finite", bridge_finite);
         MAP("frexp", bridge_frexp);
         MAP("frexpf", bridge_frexpf);
+        MAP("roundf", bridge_roundf);
+        MAP("round", bridge_round);
         MAP("ldexpf", bridge_ldexpf);
+        MAP("ldexp", bridge_ldexp);
+        MAP("trunc", bridge_trunc);
+        MAP("truncf", bridge_truncf);
         MAP("fabsf", bridge_fabsf);
+        MAP("fabs", bridge_fabs);
+        MAP("sincosf", bridge_sincosf);
+        MAP("sincos", bridge_sincos);
+        MAP("nextafterf", bridge_nextafterf);
+        MAP("nextafter", bridge_nextafter);
     }
-}   
+} // namespace MathBridge
 
 extern "C" double bridge_log(double x)
 {
@@ -204,9 +215,21 @@ extern "C" float bridge_sqrtf(float x)
 {
     return ::sqrtf(x);
 }
-extern "C" div_t bridge_div(int numerator, int denominator)
+
+// Guest expects the i386 SysV struct return: hidden result pointer, popped by the
+// callee. MinGW uses EDX:EAX instead, so spell it out in asm. int == long here.
+extern "C" void __attribute__((naked)) bridgeLdiv()
 {
-    return ::div(numerator, denominator);
+    __asm__ volatile(".intel_syntax noprefix\n\t"
+                     "mov ecx, [esp + 4]\n\t"
+                     "mov eax, [esp + 8]\n\t"
+                     "cdq\n\t"
+                     "idiv dword ptr [esp + 12]\n\t"
+                     "mov [ecx], eax\n\t"
+                     "mov [ecx + 4], edx\n\t"
+                     "mov eax, ecx\n\t"
+                     "ret 4\n\t"
+                     ".att_syntax prefix\n\t");
 }
 extern "C" int bridge_finite(double x)
 {
@@ -224,14 +247,53 @@ extern "C" float bridge_frexpf(float x, int *exp)
 {
     return ::frexpf(x, exp);
 }
+extern "C" float bridge_roundf(float x)
+{
+    return ::roundf(x);
+}
+extern "C" double bridge_round(double x)
+{
+    return ::round(x);
+}
+extern "C" double bridge_ldexp(double x, int exp)
+{
+    return ::ldexp(x, exp);
+}
 extern "C" float bridge_ldexpf(float x, int exp)
 {
     return ::ldexpf(x, exp);
 }
-
+extern "C" double bridge_trunc(double x)
+{
+    return ::trunc(x);
+}
+extern "C" float bridge_truncf(float x)
+{
+    return ::truncf(x);
+}
 extern "C" float bridge_fabsf(float x)
 {
     return ::fabsf(x);
+}
+extern "C" double bridge_fabs(double x)
+{
+    return ::fabs(x);
+}
+extern "C" void bridge_sincos(double x, double *s, double *c)
+{
+    ::sincos(x, s, c);
+}
+extern "C" void bridge_sincosf(float x, float *s, float *c)
+{
+    ::sincosf(x, s, c);
+}
+extern "C" double bridge_nextafter(double x, double y)
+{
+    return ::nextafter(x, y);
+}
+extern "C" float bridge_nextafterf(float x, float y)
+{
+    return ::nextafterf(x, y);
 }
 
 #endif

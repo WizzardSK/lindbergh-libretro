@@ -2,6 +2,11 @@
 #define __SEGAAPI_H
 
 /* GUID Definitions */
+
+/* Windows defines an identical GUID in guiddef.h and guards it with GUID_DEFINED. Defer to it when
+ * present: miniaudio pulls in the Windows headers, and defining our own on top is a hard error. */
+#ifndef GUID_DEFINED
+#define GUID_DEFINED
 typedef struct _GUID
 {
     unsigned long Data1;
@@ -9,8 +14,11 @@ typedef struct _GUID
     unsigned short Data3;
     unsigned char Data4[8];
 } GUID;
+#endif
 
+#ifndef DEFINE_GUID
 #define DEFINE_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) extern const GUID name
+#endif
 
 DEFINE_GUID(EAXPROPERTYID_EAX40_SEGA_Custom, 0xa7feec3f, 0x2bfd, 0x4a40, 0x89, 0x1f, 0x74, 0x23, 0xe3, 0x8b, 0xac, 0x1f);
 
@@ -31,6 +39,9 @@ extern GUID EAXPROPERTYID_EAX40_FXSlot0;
 extern GUID EAXPROPERTYID_EAX40_FXSlot1;
 extern GUID EAXPROPERTYID_EAX40_FXSlot2;
 extern GUID EAXPROPERTYID_EAX40_FXSlot3;
+extern GUID EAXPROPERTYID_EAX40_Context;
+extern GUID EAXPROPERTYID_EAX40_Source;
+extern GUID EAX_PrimaryFXSlotID;
 
 /* Return values */
 #define SEGARESULT_FAILURE(_x) ((1 << 31) | 0xA000 | (_x))

@@ -43,11 +43,23 @@ namespace MathBridge
     extern "C" double bridge_sqrt(double x);
     extern "C" float bridge_sqrtf(float x);
 
-    extern "C" div_t bridge_div(int numerator, int denominator);
+    // Takes (result*, numerator, denominator) and pops the result pointer;
+    // serves both div and ldiv. See mathBridge.cpp.
+    extern "C" void bridgeLdiv();
     extern "C" int bridge_finite(double x);
     extern "C" int bridge_finitef(float x);
     extern "C" double bridge_frexp(double x, int *exp);
     extern "C" float bridge_frexpf(float x, int *exp);
+    extern "C" float bridge_roundf(float x);
+    extern "C" double bridge_round(double x);
+    extern "C" double bridge_ldexp(double x, int exp);
     extern "C" float bridge_ldexpf(float x, int exp);
+    extern "C" double bridge_trunc(double x);
+    extern "C" float bridge_truncf(float x);
+    extern "C" double bridge_fabs(double x);
     extern "C" float bridge_fabsf(float x);
+    extern "C" void bridge_sincos(double x, double *s, double *c);
+    extern "C" void bridge_sincosf(float x, float *s, float *c);
+    extern "C" double bridge_nextafter(double x, double y);
+    extern "C" float bridge_nextafterf(float x, float y);
 }

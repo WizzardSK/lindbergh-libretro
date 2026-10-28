@@ -202,6 +202,8 @@ namespace GraphicsBridge
         MAP("glXCreateContextWithConfigSGIX", bridgeGlxCreateContextWithConfigSGIX);
         MAP("glXCreateGLXPbufferSGIX", bridgeGlxCreateGLXPbufferSGIX);
         MAP("glXDestroyGLXPbufferSGIX", bridgeGlxDestroyGLXPbufferSGIX);
+        MAP("glXQueryDrawable", bridgeGlxQueryDrawable);
+        MAP("glXQueryGLXPbufferSGIX", bridgeGlxQueryDrawable);
 
         // CG
         MAP_WITH_ORIG("cgCreateProgram", bridgeCgCreateProgram, &real_cgCreateProgram);

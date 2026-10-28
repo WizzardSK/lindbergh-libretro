@@ -13,6 +13,7 @@
 #define I2C_WRITE 3
 
 extern uint32_t gId;
+extern int gGrp;
 
 union i2c_smbus_data {
     uint8_t byte;
@@ -102,6 +103,8 @@ int initEeprom()
                 }
             }
     }
+    if (gGrp == GROUP_VF5)
+        getConfig()->vf5CabinetMode = getVF5CabinetMode(eeprom);
 
     fseek(eeprom, 0, SEEK_SET);
 

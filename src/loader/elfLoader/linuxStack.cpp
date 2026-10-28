@@ -31,8 +31,17 @@ uint32_t LinuxStack::Setup(uint32_t size, int argc, char** argv, uint32_t* outSt
     if (outStackBase) *outStackBase = highAddr;
     if (outStackLimit) *outStackLimit = lowAddr;
     
-    uint32_t esp = highAddr - reserveSize;
-    
+    // Guest code needs the 16-byte aligned ESP the Linux kernel gives _start, or
+    // every movaps on a stack local raises #GP. The vector below is 25 + argc words.
+    const uint32_t words = 2                       // AT_NULL pair
+                         + (auxvInfo ? 20u : 0u)   // ten auxv pairs
+                         + 1                       // envp terminator
+                         + 1                       // argv terminator
+                         + (uint32_t)argc          // argv pointers
+                         + 1;                      // argc itself
+    uint32_t esp = (highAddr - reserveSize) & ~15u;
+    esp -= (16u - ((words * 4u) & 15u)) & 15u;
+
     uint32_t* ptr = (uint32_t*)esp;
 
     // --- Auxiliary vector (highest addresses, pushed first) ---

@@ -205,12 +205,6 @@ void startSDL()
         glad_glDebugMessageCallback(openglDebugCallback, NULL);
     }
 
-    // If games are any of the LGJ or Primeval Hunt, we prevent the window to resize.
-    if ((gGrp == GROUP_LGJ || gId == PRIMEVAL_HUNT_SBPP) && !getConfig()->fullscreen)
-        SDL_SetWindowMaximumSize(g_SdlWindow, gWidth, gHeight);
-    else if (gGrp != GROUP_LGJ)
-        SDL_SetWindowMaximumSize(g_SdlWindow, displayMode->w, displayMode->h);
-
     SDL_SetWindowMinimumSize(g_SdlWindow, windowWidth, gHeight);
 
     // Hacky way to make AxA games render the characters properly
@@ -227,8 +221,7 @@ void startSDL()
     initBlitting();
     lrOffscreenBind();
 
-    if (gId != PRIMEVAL_HUNT_SBPP && gGrp != GROUP_LGJ)
-        SDL_SetWindowResizable(g_SdlWindow, true);
+    SDL_SetWindowResizable(g_SdlWindow, true);
 
     // For the libretro core the window stays hidden: the frames go to the
     // core (libretroBridge.c), which the frontend paces
@@ -240,7 +233,6 @@ void startSDL()
     Uint64 startTime = SDL_GetTicks();
     int running = !libretroMode();
 
-    // We clear the window background
     while (running)
     {
         if (SDL_GetTicks() - startTime >= 1000)
@@ -248,6 +240,7 @@ void startSDL()
         glad_glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glad_glClear(GL_COLOR_BUFFER_BIT);
         SDL_GL_SwapWindow(g_SdlWindow);
+        SDL_PumpEvents();
     }
 
     creatingWindow = false;
@@ -268,6 +261,70 @@ void startSDL()
         setCursor(touchCursor);
     else if (getConfig()->hideCursor)
         SDL_HideCursor();
+}
+
+/*
+ * Fix for Let's Go Jungle window resize
+ */
+void refreshResizedDrawable()
+{
+    if (gGrp != GROUP_LGJ)
+        return;
+
+    static int lastWidth = 0;
+    static int lastHeight = 0;
+    static int pendingClears = 0;
+
+    if (g_SdlWindow == NULL)
+        return;
+
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(g_SdlWindow, &width, &height);
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (width != lastWidth || height != lastHeight)
+    {
+        lastWidth = width;
+        lastHeight = height;
+        /* The buffers are reallocated lazily, so clear across the swap too. */
+        pendingClears = 2;
+    }
+
+    if (pendingClears == 0)
+        return;
+
+    pendingClears--;
+
+    GLint drawFbo = 0;
+    GLboolean depthMask = GL_TRUE;
+    GLint stencilMask = 0;
+    GLfloat clearDepth = 1.0f;
+    GLint clearStencil = 0;
+    GLboolean scissor = glad_glIsEnabled(GL_SCISSOR_TEST);
+
+    glad_glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
+    glad_glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    glad_glGetIntegerv(GL_STENCIL_WRITEMASK, &stencilMask);
+    glad_glGetFloatv(GL_DEPTH_CLEAR_VALUE, &clearDepth);
+    glad_glGetIntegerv(GL_STENCIL_CLEAR_VALUE, &clearStencil);
+
+    glad_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    if (scissor)
+        glad_glDisable(GL_SCISSOR_TEST);
+    glad_glDepthMask(GL_TRUE);
+    glad_glStencilMask(0xFFFFFFFFu);
+    glad_glClearDepth(1.0);
+    glad_glClearStencil(0);
+    glad_glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+    glad_glClearStencil(clearStencil);
+    glad_glClearDepth((GLdouble)clearDepth);
+    glad_glStencilMask((GLuint)stencilMask);
+    glad_glDepthMask(depthMask);
+    if (scissor)
+        glad_glEnable(GL_SCISSOR_TEST);
+    glad_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFbo);
 }
 
 SDL_Window *getSDLWindow()
@@ -336,41 +393,38 @@ void pollEvents()
         {
             case SDL_EVENT_KEY_DOWN:
             {
-                if (gGrp != GROUP_LGJ && gId != PRIMEVAL_HUNT_SBPP)
+                SDL_Keymod mod = SDL_GetModState();
+                if ((event.key.key == SDLK_RETURN && (mod & SDL_KMOD_ALT)) || event.key.key == SDLK_F11)
                 {
-                    SDL_Keymod mod = SDL_GetModState();
-                    if ((event.key.key == SDLK_RETURN && (mod & SDL_KMOD_ALT)) || event.key.key == SDLK_F11)
+                    if (isFullScreen)
                     {
-                        if (isFullScreen)
+                        if (!SDL_SetWindowFullscreen(g_SdlWindow, 0))
                         {
-                            if (!SDL_SetWindowFullscreen(g_SdlWindow, 0))
-                            {
-                                log_error("Error setting windowed mode: %s\n", SDL_GetError());
-                            }
-                            else
-                            {
-                                if ((long long)gWidth * 3 == (long long)gHeight * 4)
-                                    SDL_SetWindowSize(g_SdlWindow, gWidth + 1, gHeight);
-                                else
-                                    SDL_SetWindowSize(g_SdlWindow, gWidth, gHeight + 1);
-                                isFullScreen = false;
-                                if (getConfig()->fullscreen)
-                                    SDL_SetWindowBordered(g_SdlWindow, true);
-                            }
+                            log_error("Error setting windowed mode: %s\n", SDL_GetError());
                         }
                         else
                         {
-                            if (!SDL_SetWindowFullscreen(g_SdlWindow, true))
-                            {
-                                log_error("Error setting fullscreen mode: %s\n", SDL_GetError());
-                            }
+                            if ((long long)gWidth * 3 == (long long)gHeight * 4)
+                                SDL_SetWindowSize(g_SdlWindow, gWidth + 1, gHeight);
                             else
-                            {
-                                isFullScreen = true;
-                            }
+                                SDL_SetWindowSize(g_SdlWindow, gWidth, gHeight + 1);
+                            isFullScreen = false;
+                            if (getConfig()->fullscreen)
+                                SDL_SetWindowBordered(g_SdlWindow, true);
                         }
-                        break;
                     }
+                    else
+                    {
+                        if (!SDL_SetWindowFullscreen(g_SdlWindow, true))
+                        {
+                            log_error("Error setting fullscreen mode: %s\n", SDL_GetError());
+                        }
+                        else
+                        {
+                            isFullScreen = true;
+                        }
+                    }
+                    break;
                 }
                 if (event.key.key == SDLK_F12)
                 {

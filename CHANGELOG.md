@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Merged upstream Linux Loader up to 4ffa095 (28.10.2026: graphics bridging, shader handling, audio, touch screen, pinned Mesa); its changes are in upstream's `docs/changelog` (NNshi).
 - README: Game folders, what After Burner Climax's and The House of the Dead 4's dumps need moved or renamed before they run, and NVIDIA's anisotropic filtering for the loader on Windows (NNshi).
 - Core options in categories (Video, Input, Audio, System) with tooltips (core options v2); Steering Inner Zone and Steering Effect show and hide as Steering Response changes, without reopening the menu, and Inner Zone lists 5 to 50 in order (25 still the default). New option Input > Force Feedback to Rumble, on by default, its tooltip naming the games it works with (NNshi).
 - Builds: packages come from Ubuntu's own archive instead of Azure's mirror, which served some 50 KB/s, and the Windows job installs only MinGW, without upgrading the whole runner; a package fetch that stalls retries and then fails its step instead of holding the job for its whole time (NNshi).

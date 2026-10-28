@@ -38,3 +38,5 @@ unsigned int lrGameFramebuffer(unsigned int framebuffer);
 /* A colour buffer the game names for drawing or reading, GL_BACK and the
  * like turned into lrGameFbo's attachment while it is bound */
 unsigned int lrGameColorBuffer(unsigned int mode, bool draw);
+void blitWindowToRender(float windowX, float windowY, float *renderX, float *renderY);
+void blitRenderToWindow(float renderX, float renderY, float *windowX, float *windowY);

@@ -153,7 +153,7 @@ void initCrossHairs()
     if (!testMode && gId != PRIMEVAL_HUNT_SBPP)
         startPollingThread();
 
-    textureIdIdxAdjust = p1CrossHairInitialized + p2CrossHairInitialized;
+    textureIdIdxAdjust = (crossHair[0].texture != 0) + (crossHair[1].texture != 0);
 }
 
 int loadCrosshairImage(int player, const char *filepath)
@@ -198,27 +198,27 @@ int loadCrosshairImage(int player, const char *filepath)
     crossHair[player].vao = 0;
     crossHair[player].vbo = 0;
 
-    if (gId == GHOST_SQUAD_EVOLUTION_SBNJ)
-    {
-        GLuint tex;
-        glad_glGenTextures(1, &tex);
-        glad_glBindTexture(GL_TEXTURE_2D, tex);
-        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, crossHair[player].surface->w, crossHair[player].surface->h, 0, GL_RGBA,
-                          GL_UNSIGNED_BYTE, crossHair[player].surface->pixels);
+    /* Take the texture id now, not on first draw: textureIdIdxAdjust is counted once at init,
+     * so the loader's ids have to be taken before the game creates its own. */
+    GLuint tex = 0;
+    glad_glGenTextures(1, &tex);
+    glad_glBindTexture(GL_TEXTURE_2D, tex);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, crossHair[player].surface->w, crossHair[player].surface->h, 0, GL_RGBA,
+                      GL_UNSIGNED_BYTE, crossHair[player].surface->pixels);
 
-        SDL_DestroySurface(crossHair[player].surface);
+    SDL_DestroySurface(crossHair[player].surface);
+    crossHair[player].surface = NULL;
 
-        crossHair[player].width = getConfig()->customCrossHairWidth;
-        crossHair[player].height = getConfig()->customCrossHairHeight;
-        crossHair[player].texture = tex;
+    crossHair[player].width = getConfig()->customCrossHairWidth;
+    crossHair[player].height = getConfig()->customCrossHairHeight;
+    crossHair[player].texture = tex;
 
-        /* Create VAO/VBO geometry — needed for shader-based rendering */
-        createCrosshairGeometry(&crossHair[player]);
-    }
+    /* Create VAO/VBO geometry — needed for shader-based rendering */
+    createCrosshairGeometry(&crossHair[player]);
 
     return 1;
 }

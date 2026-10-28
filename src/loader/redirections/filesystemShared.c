@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <libgen.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <stdarg.h>
@@ -51,7 +52,7 @@
 #define HOOK_FILE_NAME "NUL"
 #endif
 
-DeviceType hooks[5] = {NO_DEVICE, NO_DEVICE, NO_DEVICE, NO_DEVICE, NO_DEVICE};
+int hooks[DEVICE_COUNT] = {NO_FD, NO_FD, NO_FD, NO_FD, NO_FD, NO_FD};
 FILE *fileHooks[10] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 FileTypes fileRead[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 char envpath[100];
@@ -68,7 +69,7 @@ extern int hummerExtremeShaderFileIndex;
 extern bool cachedShaderFilesLoaded;
 extern char vf5StageNameAbbr[5];
 
-extern bool mj4ResponseReady;
+extern bool eloResponseReady;
 
 bool sprFontXstLoaded = false;
 
@@ -224,7 +225,7 @@ int sharedOpen(const char *pathname, int flags, ...)
             getConfig()->emulateTouchscreen == 0)
             return _open(getConfig()->serial1Path, flags, mode);
 
-        if (hooks[SERIAL0] != NO_DEVICE && getConfig()->emulateHW210CardReader && gId != R_TUNED_SBQW)
+        if (hooks[SERIAL0] != NO_FD && getConfig()->emulateHW210CardReader && gId != R_TUNED_SBQW)
             return hooks[SERIAL0];
 
         hooks[SERIAL0] = _open(HOOK_FILE_NAME, flags, mode);
@@ -242,7 +243,7 @@ int sharedOpen(const char *pathname, int flags, ...)
             getConfig()->emulateTouchscreen == 0)
             return _open(getConfig()->serial2Path, flags, mode);
 
-        if (hooks[SERIAL1] != NO_DEVICE && getConfig()->emulateHW210CardReader && gId != R_TUNED_SBQW)
+        if (hooks[SERIAL1] != NO_FD && getConfig()->emulateHW210CardReader && gId != R_TUNED_SBQW)
             return hooks[SERIAL1];
 
         hooks[SERIAL1] = _open(HOOK_FILE_NAME, flags, mode);
@@ -608,12 +609,12 @@ FILE *sharedFopen64(const char *pathname, const char *mode)
             hummerExtremeShaderFileIndex = idx;
         }
 #ifdef _WIN32
-            char winPath[MAX_PATH];
-            ConvertPath(winPath, pathname, MAX_PATH);
-            if (strcmp(mode, "r") == 0)
-                mode = "rb";
+        char winPath[MAX_PATH];
+        ConvertPath(winPath, pathname, MAX_PATH);
+        if (strcmp(mode, "r") == 0)
+            mode = "rb";
 
-            return _fopen64(winPath, mode);
+        return _fopen64(winPath, mode);
 #endif
         return _fopen64(pathname, mode);
     }
@@ -673,12 +674,11 @@ int sharedClose(int fd)
         _close = REAL_FUNC(close);
 #endif
 
-
     for (size_t i = 0; i < (sizeof hooks / sizeof hooks[0]); i++)
     {
-        if ((int)hooks[i] == fd)
+        if (hooks[i] == fd)
         {
-            hooks[i] = -1;
+            hooks[i] = NO_FD;
             return 0;
         }
     }
@@ -729,27 +729,42 @@ ssize_t sharedRead(int fd, void *buf, size_t count)
         _read = REAL_FUNC(read);
 #endif
 
-    if (fd == (int)hooks[BASEBOARD])
+    if (fd < 0)
+    {
+        errno = EBADF;
+        return -1;
+    }
+
+    if (fd == hooks[BASEBOARD])
     {
         return baseboardRead(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL0] && getConfig()->emulateRideboard)
+    if (fd == hooks[SERIAL0] && getConfig()->emulateRideboard)
     {
         return rideboardRead(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL0] && getConfig()->emulateDriveboard)
+    if (fd == hooks[SERIAL0] && getConfig()->emulateDriveboard)
     {
         return driveboardRead(fd, buf, count);
     }
 
-    if ((fd == (int)hooks[SERIAL0] || fd == (int)hooks[SERIAL1]) && getConfig()->emulateHW210CardReader)
+    if (gGrp == GROUP_VF5 && getConfig()->vf5CabinetMode == TERMINAL)
+    {
+        if (fd == hooks[SERIAL0])
+            return cardReaderRead(fd, buf, count);
+
+        if (fd == hooks[SERIAL1])
+            return eloReadTouchPacket(buf, count);
+    }
+
+    if ((fd == hooks[SERIAL0] || fd == hooks[SERIAL1]) && getConfig()->emulateHW210CardReader)
     {
         return cardReaderRead(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL0] || fd == (int)hooks[SERIAL1])
+    if (fd == hooks[SERIAL0] || fd == hooks[SERIAL1])
     {
         if (gId == PRIMEVAL_HUNT_SBPP && getConfig()->emulateTouchscreen == 1)
         {
@@ -757,14 +772,13 @@ ssize_t sharedRead(int fd, void *buf, size_t count)
             return 1;
         }
         if ((gId == MJ4_EVO_SBTA || gId == MJ4_SBPN_REVG || gId == QUIZ_AXA_SBMS || gId == QUIZ_AXA_SBUR_LIVE) &&
-            getConfig()->emulateTouchscreen == 1 && mj4ResponseReady)
+            getConfig()->emulateTouchscreen == 1 && eloResponseReady)
         {
-            return mj4ReadTouchPacket(buf, count);
+            return eloReadTouchPacket(buf, count);
         }
-        return -1;
     }
 
-    if (fd == (int)hooks[PCI_CARD_000])
+    if (fd == hooks[PCI_CARD_000])
     {
         memcpy(buf, pci_000, count);
         return count;
@@ -893,41 +907,55 @@ ssize_t sharedWrite(int fd, const void *buf, size_t count)
         _write = REAL_FUNC(write);
 #endif
 
+    if (fd < 0)
+    {
+        errno = EBADF;
+        return -1;
+    }
+
     // void *addr = __builtin_return_address(0);
-    if (fd == (int)hooks[BASEBOARD])
+    if (fd == hooks[BASEBOARD])
     {
         return baseboardWrite(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL0] && getConfig()->emulateRideboard)
+    if (fd == hooks[SERIAL0] && getConfig()->emulateRideboard)
     {
         return rideboardWrite(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL0] && getConfig()->emulateDriveboard)
+    if (fd == hooks[SERIAL0] && getConfig()->emulateDriveboard)
     {
         return driveboardWrite(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL1] && getConfig()->emulateDriveboard)
+    if (fd == hooks[SERIAL1] && getConfig()->emulateDriveboard)
     {
         if (gGrp != GROUP_OUTRUN && gGrp != GROUP_OUTRUN_TEST && gId != R_TUNED_SBQW)
             return driveboardWrite(fd, buf, count);
     }
 
-    if (fd == (int)hooks[SERIAL1] && (gId == MJ4_EVO_SBTA || gId == MJ4_SBPN_REVG || gId == QUIZ_AXA_SBMS || gId == QUIZ_AXA_SBUR_LIVE))
+    if (gGrp == GROUP_VF5 && getConfig()->vf5CabinetMode == (VF5CabinetMode)TERMINAL)
     {
-        return mj4WriteTouchPacket(buf, count);
+        if (fd == hooks[SERIAL0])
+            return cardReaderWrite(fd, buf, count);
+
+        if (fd == hooks[SERIAL1])
+            return eloWriteTouchPacket(buf, count);
     }
 
-    if ((fd == (int)hooks[SERIAL0] || fd == (int)hooks[SERIAL1]) && getConfig()->emulateHW210CardReader)
+    if (fd == hooks[SERIAL1] && (gId == MJ4_EVO_SBTA || gId == MJ4_SBPN_REVG || gId == QUIZ_AXA_SBMS || gId == QUIZ_AXA_SBUR_LIVE))
+    {
+        return eloWriteTouchPacket(buf, count);
+    }
+
+    if ((fd == hooks[SERIAL0] || fd == hooks[SERIAL1]) && getConfig()->emulateHW210CardReader)
     {
         return cardReaderWrite(fd, buf, count);
     }
 
     return _write(fd, buf, count);
 }
-
 
 int sharedIoctl(int fd, unsigned long int request, ...)
 {
@@ -942,7 +970,7 @@ int sharedIoctl(int fd, unsigned long int request, ...)
         _ioctl = REAL_FUNC(ioctl);
 #endif
 
-    if (fd == (int)hooks[EEPROM])
+    if (fd == hooks[EEPROM])
     {
         if (request == 0xC04064A0)
 #ifdef __linux__
@@ -953,16 +981,19 @@ int sharedIoctl(int fd, unsigned long int request, ...)
         return eepromIoctl(fd, request, argp);
     }
 
-    if (fd == (int)hooks[BASEBOARD])
+    if (fd == hooks[BASEBOARD])
     {
         return baseboardIoctl(fd, request, argp);
     }
 
-    if (fd == (int)hooks[SERIAL0] || fd == (int)hooks[SERIAL1])
+    if ((fd == hooks[SERIAL0] || fd == hooks[SERIAL1]) && request == 0x541b)
     {
-        if (request == 0x541b && (gId == R_TUNED_SBQW || gId == MJ4_SBPN_REVG || gId == MJ4_EVO_SBTA) && fd == (int)hooks[SERIAL1])
+        uint8_t d = 1;
+        if ((gId == VIRTUA_FIGHTER_5_FINAL_SHOWDOWN_SBUV_REVA || gId == VIRTUA_FIGHTER_5_FINAL_SHOWDOWN_SBXX_REVB ||
+             gId == VIRTUA_FIGHTER_5_FINAL_SHOWDOWN_SBXX_REVB_6000 || gId == VIRTUA_FIGHTER_5_SBQU_R ||
+             gId == VIRTUA_FIGHTER_5_SBQU_R_REVD || gId == VIRTUA_FIGHTER_5_SBQU_R_REVG) ||
+            ((gId == R_TUNED_SBQW || gId == MJ4_SBPN_REVG || gId == MJ4_EVO_SBTA) && fd == hooks[SERIAL1]))
         {
-            uint8_t d = 1;
             memcpy(argp, &d, sizeof(uint8_t));
         }
         else if (getConfig()->emulateDriveboard)
@@ -984,13 +1015,20 @@ int sharedIoctl(int fd, unsigned long int request, ...)
     return 0;
 }
 
-#ifdef WIN32
+#define LINUX_FD_SETSIZE 1024
 #define LINUX_NFDBITS (8 * sizeof(unsigned long))
-#define LINUX_FD_SET_BIT(n, p) (((unsigned long *)(p))[(n) / LINUX_NFDBITS] |= (1UL << ((n) % LINUX_NFDBITS)))
-#define LINUX_FD_CLR_BIT(n, p) (((unsigned long *)(p))[(n) / LINUX_NFDBITS] &= ~(1UL << ((n) % LINUX_NFDBITS)))
-#define LINUX_FD_ISSET_BIT(n, p) (((unsigned long *)(p))[(n) / LINUX_NFDBITS] & (1UL << ((n) % LINUX_NFDBITS)))
-#define LINUX_FD_ZERO_BIT(p) memset((void *)(p), 0, 128)
+#define LINUX_FD_ISSET_BIT(n, p) (((const unsigned long *)(p))[(n) / LINUX_NFDBITS] & (1UL << ((n) % LINUX_NFDBITS)))
+
+static int linuxFdIsSet(int nfds, int fd, const fd_set *set)
+{
+    if (set == NULL || fd < 0 || fd >= nfds || fd >= LINUX_FD_SETSIZE)
+        return 0;
+#ifdef __linux__
+    return FD_ISSET(fd, set) != 0;
+#else
+    return LINUX_FD_ISSET_BIT(fd, set) != 0;
 #endif
+}
 
 static int (*_select)(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) = NULL;
 int sharedSelect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout)
@@ -1000,33 +1038,17 @@ int sharedSelect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         _select = REAL_FUNC(select);
 #endif
 
-    int baseboardFd = hooks[BASEBOARD];
-
-    if (baseboardFd >= 0 && baseboardFd < nfds)
+    if (linuxFdIsSet(nfds, hooks[BASEBOARD], readfds) || linuxFdIsSet(nfds, hooks[BASEBOARD], writefds))
     {
-#ifdef __linux__
-        if (readfds != NULL && FD_ISSET(hooks[BASEBOARD], readfds))
-#else
-        if (readfds != NULL && LINUX_FD_ISSET_BIT(hooks[BASEBOARD], readfds))
-#endif
-        {
-            return baseboardSelect(nfds, readfds, writefds, exceptfds, timeout);
-        }
-
-#ifdef __linux__
-        if (writefds != NULL && FD_ISSET(hooks[BASEBOARD], writefds))
-#else
-        if (writefds != NULL && LINUX_FD_ISSET_BIT(hooks[BASEBOARD], writefds))
-#endif
-        {
-            return baseboardSelect(nfds, readfds, writefds, exceptfds, timeout);
-        }
+        return baseboardSelect(nfds, readfds, writefds, exceptfds, timeout);
     }
 
     if ((getConfig()->emulateHW210CardReader == 1 || getConfig()->emulateDriveboard == 1) &&
         (gGrp != GROUP_ID5 && gGrp != GROUP_ID4_EXP && gGrp != GROUP_ID4_JAP))
     {
-        return 1;
+        if (linuxFdIsSet(nfds, hooks[SERIAL0], readfds) || linuxFdIsSet(nfds, hooks[SERIAL0], writefds) ||
+            linuxFdIsSet(nfds, hooks[SERIAL1], readfds) || linuxFdIsSet(nfds, hooks[SERIAL1], writefds))
+            return 1;
     }
 
 #ifdef __linux__

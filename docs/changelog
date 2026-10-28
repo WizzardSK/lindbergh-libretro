@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.13]
+### Added
+    - Virtua Fighter 5 support for Windows. All versions.
+    - VF5 FS Rev B Terminal support.
+    - VF5 support for server, tv and terminal modes with network support for linux.
+    - HOD4 and HOD4 SP CPU speed auto detect.
+    - Stack alignment to prevent crashes on newer distributions (Arch, CachyOS, Fedora, recent Ubuntu). 
+    - Let's Go Jungle games window resizing now works.
+    - Primeval Hunt keeps the gun calibration even if the window is resized.
+    - HOD4 now works with newer linux distros.
+### Changed
+    - GSEvo now renders internally at the configured resolution instead of being upscaled from 640x480.
+    - GSEvo new shaders will fix lightning with AMD/Intel GPUs.
+    - GSEvo can also be played at widescreen, 2d elements will look streched.
+    - Windows pbuffers now use FBO instead of a hidden window.
+    - Virtua Tennis 3 players shadow fix in Linux with Mesa under AMD GPU.
+    - Complete libsegaapi emulation with effects and a few bugs fixed and some missing implementations (needs more testing).
+### Fixed
+    - GSEvo boots fine with Intel GPUs in Windows.
+    - Harley-Davidson opponent marker now tracks the rival correctly at any resolution.
+    - SEGA Race TV lighting effect and blur fixed at any res.
+    - Primeval Hunt glitches fixed without using zink (still needs testing).
+    - ID games shader fixed. Now comic part before race will render characters with AMD in Windows.
+    - Bug in glxBridge that prevented the pbuffer from work in linux.
+    - Fixed a cast to make the building work in newer Mingw toolchains (MSYS2).
+
 ## [3.0.12]
 ### Fixed
     - Hummer test mode and Extreme would not work in windows due to stack alignment issues.

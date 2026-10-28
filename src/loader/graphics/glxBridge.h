@@ -69,6 +69,7 @@ extern "C"
     void bridgeGlxDestroyPbuffer(Display *dpy, GLXPbuffer pbuf);
     GLXPbuffer bridgeGlxCreateGLXPbufferSGIX(Display *dpy, GLXFBConfig config, int width, int height, int *attrib_list);
     void bridgeGlxDestroyGLXPbufferSGIX(Display *dpy, GLXPbuffer pbuf);
+    void bridgeGlxQueryDrawable(Display *dpy, GLXDrawable draw, int attribute, unsigned int *value);
     GLXContext bridgeGlxCreateNewContext(Display *dpy, GLXFBConfig config, int render_type, GLXContext share_list, bool direct);
     bool bridgeGlxQueryExtension(Display *dpy, const char *extList);
 

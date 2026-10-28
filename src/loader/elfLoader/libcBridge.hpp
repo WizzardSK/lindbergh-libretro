@@ -84,6 +84,7 @@ namespace LibcBridge
     struct tm32 *bridgeGmtime_R(const time_t *timep, struct tm32 *result);
     size_t bridgeStrftime(char *s, size_t maxsize, const char *format, const struct tm *timeptr);
     void bridgeFtime(struct timeb *tp);
+    double bridgeDifftime(time_t time1, time_t time2);
 
     void bridgeAbort();
     void bridgeExit(int status);
@@ -117,6 +118,7 @@ namespace LibcBridge
     void *bridgeOstreamString(void *ostream_this, const char *str);
 
     int bridgeIsinf(double x);
+    int bridgeIsinff(float x);
     int bridgeIsnan(double x);
     int bridgeIsnanf(float x);
     int bridgeWcscoll_l(const uint32_t *s1, const uint32_t *s2, void *locale);
@@ -144,6 +146,8 @@ namespace LibcBridge
     int bridgeWait(int *wstatus);
     int bridgeRaise(int sig);
     int bridgePoll(struct pollfd *fds, int nfds, int timeout);
+    void bridgeQsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+    void *bridgeBsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 
     void (*bridgeSignal(int signum, void (*handler)(int)))(int);
     int bridgeSigfillset(void *set);
@@ -181,6 +185,8 @@ namespace LibcBridge
     uint32_t bridgePutwc(uint32_t wc, FILE *stream);
     uint32_t bridgeGetwc(FILE *stream);
     uint32_t bridgeUngetwc(uint32_t wc, FILE *stream);
+    int bridgeGlob(const char *pattern, int flags, int (*errfunc)(const char *eacces, int errcode), void *pglob);
+    void bridgeGlobfree(void *pglob);
 
     int bridgeWaitpid(int pid, int *wstatus, int options);
     pid_t bridgeGetuid(void);

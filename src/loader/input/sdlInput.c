@@ -80,14 +80,15 @@ extern bool sdlInputInitialized;
 extern Dest dest;
 
 extern int phX, phY, phW, phH;
+extern int phYWin;
 int phIsDragging = 0;
 
-extern bool mj4MousePressed;
-int mj4MouseX = 0;
-int mj4MouseY = 0;
+extern bool eloMousePressed;
+int eloMouseX = 0;
+int eloMouseY = 0;
 extern int drawableW;
 extern int drawableH;
-extern bool mj4TouchedInsideScreen;
+extern bool eloTouchedInsideScreen;
 
 extern bool gTriggerInsertKey;
 
@@ -1889,8 +1890,10 @@ void processSdlEvent(const SDL_Event *e)
                         updateBindingState(binding, isActive, isActive ? 1.0f : 0.0f);
                         // Special behavior for shooting games requiring explicit mouse clicks
                         int x, y;
+                        float touchX = 0.0f, touchY = 0.0f;
+                        blitWindowToRender(e->motion.x, e->motion.y, &touchX, &touchY);
                         if (gId == PRIMEVAL_HUNT_SBPP && getConfig()->emulateTouchscreen &&
-                            phIsInsideTouchScreen(e->motion.x, e->motion.y, &x, &y))
+                            phIsInsideTouchScreen(touchX, touchY, &x, &y))
                         {
                             phTouchClick(x, y, e->type);
                             phIsDragging = isActive;
@@ -1917,7 +1920,9 @@ void processSdlEvent(const SDL_Event *e)
                     }
                 }
                 if (gameType == MAHJONG && getConfig()->emulateTouchscreen)
-                    handleMahjongTouch(e, drawableW, drawableH);
+                    handleEloTouch(e, drawableW, drawableH);
+                if (gGrp == GROUP_VF5 && getConfig()->vf5CabinetMode == TERMINAL)
+                    handleEloTouch(e, drawableW, drawableH);
             }
         }
         break;
@@ -1929,14 +1934,19 @@ void processSdlEvent(const SDL_Event *e)
 
             if (gId == PRIMEVAL_HUNT_SBPP)
             {
+                float tX = mX, tY = mY;
+                blitWindowToRender(mX, mY, &tX, &tY);
                 int x, y;
-                if (phIsDragging && phIsInsideTouchScreen(mX, mY, &x, &y))
+                if (phIsDragging && phIsInsideTouchScreen(tX, tY, &x, &y))
                     phTouchClick(x, y, e->type);
 
-                int motX = mX, motY = mY;
-                phTouchScreenCursor(mX, mY, &motX, &motY);
-                posX = ((float)(motX - phX) / (float)phW);
-                posY = ((float)(motY - phY) / (float)phH);
+                int motX = tX, motY = tY;
+                phTouchScreenCursor(tX, tY, &motX, &motY);
+                /* phYWin, not phY: phY is the GL viewport offset (bottom-up), the mouse is top-down. */
+                int gunW = phW > 0 ? phW : renderWidth;
+                int gunH = phH > 0 ? phH : renderHeight;
+                posX = ((float)(motX - phX) / (float)gunW);
+                posY = ((float)(motY - phYWin) / (float)gunH);
             }
             else
             {

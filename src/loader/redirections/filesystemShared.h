@@ -15,8 +15,11 @@ typedef enum
     EEPROM = 2,
     SERIAL0 = 3,
     SERIAL1 = 4,
-    PCI_CARD_000 = 5
+    PCI_CARD_000 = 5,
+    DEVICE_COUNT
 } DeviceType;
+
+#define NO_FD (-1)
 
 typedef enum
 {

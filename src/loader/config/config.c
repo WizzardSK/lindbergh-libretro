@@ -163,7 +163,7 @@ void setDefaultValues(EmulatorConfig *cfg)
     cfg->fpsTarget = 60.0f;
     cfg->phScreenMode = 2;
     cfg->phTestScreenSingle = 1;
-    cfg->phUseZink = 1;
+    cfg->vf5CabinetMode = SATELLITE;
     cfg->disableBuiltinFont = 0;
     cfg->disableBuiltinLogos = 0;
     cfg->hideCursor = 1;
@@ -384,7 +384,6 @@ void applyIniConfig(EmulatorConfig *config, const IniConfig *ini)
     // [GameSpecific]
     config->phScreenMode = getInt(ini, "GameSpecific", "PRIMEVAL_HUNT_SCREEN_MODE", config->phScreenMode);
     config->phTestScreenSingle = getInt(ini, "GameSpecific", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE", config->phTestScreenSingle);
-    config->phUseZink = getInt(ini, "GameSpecific", "PRIMEVAL_HUNT_USE_ZINK", config->phUseZink);
     config->skipOutrunCabinetCheck = getInt(ini, "GameSpecific", "SKIP_OUTRUN_CABINET_CHECK", config->skipOutrunCabinetCheck);
     config->mj4EnabledAtT = getInt(ini, "GameSpecific", "MJ4_ENABLED_ALL_THE_TIME", config->mj4EnabledAtT);
     config->cpuFreqGhz = getFloat(ini, "GameSpecific", "CPU_FREQ_GHZ", config->cpuFreqGhz);

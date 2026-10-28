@@ -5,53 +5,64 @@
 
 The follow list of games are supported. It is worth noting that there are multiple releases of these games, and some specific releases may not be supported.
 
-| Game Name                             | Game ID | System           | DVP       | NVidia | Intel  | AMD     |
-|---------------------------------------|---------|------------------|-----------|--------|--------|---------|
-| After Burner Climax                   | SBLR    | Lindbergh Yellow | DVP-0009  | ✓      | ✓      | ✓       |
-| After Burner Climax Rev A             | SBLR    | Lindbergh Yellow | DVP-0009A | ✓      | ✓      | ✓       |
-| After Burner Climax Rev B             | SBLR    | Lindbergh Yellow | DVP-0009B | ✓      | ✓      | ✓       |
-| After Burner Climax SDX               | SBMN    | Lindbergh Yellow | DVP-0018  | ✓      | ✓      | ✓       |
-| After Burner Climax SDX Rev A         | SBMN    | Lindbergh Yellow | DVP-0018A | ✓      | ✓      | ✓       |
-| After Burner Climax SE                | SBLR    | Lindbergh Yellow | DVP-0031  | ✓      | ✓      | ✓       |
-| After Burner Climax SE Rev A          | SBLR    | Lindbergh Yellow | DVP-0031A | ✓      | ✓      | ✓       |
-| Ghost Squad Evolution                 | SBNJ    | Lindbergh Red    | DVP-0029  | ✓      |        | ✓       |
-| Hummer                                | SBQN    | Lindbergh Yellow | DVP-0057B | ✓      | ✓      | ✓       |
-| Hummer SDLX                           | SBST    | Lindbergh Yellow | DVP-0057  | ✓      | ✓      | ✓       |
-| Hummer Extreme                        | SBST    | Lindbergh Yellow | DVP-0079  | ✓      | ✓      | ✓       |
-| Hummer Extreme MDX                    | SBST    | Lindbergh Yellow | DVP-0083  | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Rev A        | SBML    | Lindbergh Yellow | DVP-0019A | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Rev B        | SBML    | Lindbergh Yellow | DVP-0019B | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Rev C        | SBML    | Lindbergh Yellow | DVP-0019C | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Rev D        | SBML    | Lindbergh Yellow | DVP-0019D | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Rev G        | SBML    | Lindbergh Yellow | DVP-0019G | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Export Rev B | SBNK    | Lindbergh Yellow | DVP-0030B | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Export Rev C | SBNK    | Lindbergh Yellow | DVP-0030C | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 4 Export Rev D | SBNK    | Lindbergh Yellow | DVP-0030D | ✓      | ✓      | ✓       |
-| Initial D 5 EXP                       | SBRY    | Lindbergh Yellow | DVP-0075  | ✓      | ✓      | ✓       |
-| Initial D 5 EXP 2.0                   | SBTS    | Lindbergh Yellow | DVP-0084  | ✓      | ✓      | ✓       |
-| Initial D 5 EXP 2.0 Rev A             | SBQN    | Lindbergh Yellow | DVP-0084A | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 5 Rev A        | SBQZ    | Lindbergh Yellow | DVP-0070A | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 5 Rev C        | SBQZ    | Lindbergh Yellow | DVP-0070C | ✓      | ✓      | ✓       |
-| Initial D Arcade Stage 5 Rev F        | SBQZ    | Lindbergh Yellow | DVP-0070F | ✓      | ✓      | ✓       |
-| Let's Go Jungle                       | SBLU    | Lindbergh Yellow | DVP-0011  | ✓      | ✓      | ✓       |
-| Let's Go Jungle!  Rev A               | SBLU    | Lindbergh Yellow | DVP-0011A | ✓      | ✓      | ✓       |
-| Let's Go Jungle Special               | SBNR    | Lindbergh Yellow | DVP-0036  | ✓      | ✓      | ✓       |
-| Outrun 2 SP SDX                       | SBMB    | Lindbergh Yellow | DVP-0015  | ✓      | ✓      | ✓       |
-| Outrun 2 SP SDX Rev A                 | SBMB    | Lindbergh Yellow | DVP-0015A | ✓      | ✓      | ✓       |
-| Primeval Hunt                         | SBPP    | Lindbergh Red    | DVP-0048  | ✓      | ✓      | ✓       |
-| RAMBO_SBQL                            | SBQL    | Lindbergh Red EX | DVP-0069  | ✓      | ✓      | ✓       |
-| RAMBO_SBQL (China)                    | SBSS    | Lindbergh Red EX | DVP-0078  | ✓      | ✓      | ✓       |
-| The House of the Dead 4 Rev A         | SBLC    | Lindbergh Yellow | DVP-0003A | ✓      | ✓      | ✓       |
-| The House of the Dead 4 Rev B         | SBLC    | Lindbergh Yellow | DVP-0003B | ✓      | ✓      | ✓       |
-| The House of the Dead 4 Rev C         | SBLC    | Lindbergh Yellow | DVP-0003C | ✓      | ✓      | ✓       |
-| The House of the Dead 4 Special       | SBLS    | Lindbergh Yellow | DVP-0010  | ✓      | ✓      | ✓       |
-| The House of the Dead 4 Special Rev B | SBLS    | Lindbergh Yellow | DVP-0010B | ✓      | ✓      | ✓       |
-| The House of the Dead EX              | SBRC    | Lindbergh Red    | DVP-0063  | ✓      | ✓      | ✓       |
-| Too Spicy                             | SBMV    | Lindbergh Red    | DVP-0027  | ✓      | ✓      | ✓       |
-| Virtua Tennis 3                       | SBKX    | Lindbergh Yellow | DVP-0005  | ✓      | ✓      | ✓       |
-| Virtua Tennis 3 Rev A                 | SBKX    | Lindbergh Yellow | DVP-0005A | ✓      | ✓      | ✓       |
-| Virtua Tennis 3 Rev B                 | SBKX    | Lindbergh Yellow | DVP-0005B | ✓      | ✓      | ✓       |
-| Virtua Tennis 3 Rev C                 | SBKX    | Lindbergh Yellow | DVP-0005C | ✓      | ✓      | ✓       |
+| Game Name                                        | Game ID | System           | DVP       | NVidia | Intel  | AMD     |
+|--------------------------------------------------|---------|------------------|-----------|--------|--------|---------|
+| After Burner Climax                              | SBLR    | Lindbergh Yellow | DVP-0009  | ✓      | ✓      | ✓       |
+| After Burner Climax Rev A                        | SBLR    | Lindbergh Yellow | DVP-0009A | ✓      | ✓      | ✓       |
+| After Burner Climax Rev B                        | SBLR    | Lindbergh Yellow | DVP-0009B | ✓      | ✓      | ✓       |
+| After Burner Climax SDX                          | SBMN    | Lindbergh Yellow | DVP-0018  | ✓      | ✓      | ✓       |
+| After Burner Climax SDX Rev A                    | SBMN    | Lindbergh Yellow | DVP-0018A | ✓      | ✓      | ✓       |
+| After Burner Climax SE                           | SBLR    | Lindbergh Yellow | DVP-0031  | ✓      | ✓      | ✓       |
+| After Burner Climax SE Rev A                     | SBLR    | Lindbergh Yellow | DVP-0031A | ✓      | ✓      | ✓       |
+| Ghost Squad Evolution                            | SBNJ    | Lindbergh Red    | DVP-0029  | ✓      | ✓      | ✓       |
+| Hummer                                           | SBQN    | Lindbergh Yellow | DVP-0057B | ✓      | ✓      | ✓       |
+| Hummer SDLX                                      | SBST    | Lindbergh Yellow | DVP-0057  | ✓      | ✓      | ✓       |
+| Hummer Extreme                                   | SBST    | Lindbergh Yellow | DVP-0079  | ✓      | ✓      | ✓       |
+| Hummer Extreme MDX                               | SBST    | Lindbergh Yellow | DVP-0083  | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Rev A                   | SBML    | Lindbergh Yellow | DVP-0019A | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Rev B                   | SBML    | Lindbergh Yellow | DVP-0019B | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Rev C                   | SBML    | Lindbergh Yellow | DVP-0019C | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Rev D                   | SBML    | Lindbergh Yellow | DVP-0019D | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Rev G                   | SBML    | Lindbergh Yellow | DVP-0019G | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Export Rev B            | SBNK    | Lindbergh Yellow | DVP-0030B | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Export Rev C            | SBNK    | Lindbergh Yellow | DVP-0030C | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 4 Export Rev D            | SBNK    | Lindbergh Yellow | DVP-0030D | ✓      | ✓      | ✓       |
+| Initial D 5 EXP                                  | SBRY    | Lindbergh Yellow | DVP-0075  | ✓      | ✓      | ✓       |
+| Initial D 5 EXP 2.0                              | SBTS    | Lindbergh Yellow | DVP-0084  | ✓      | ✓      | ✓       |
+| Initial D 5 EXP 2.0 Rev A                        | SBQN    | Lindbergh Yellow | DVP-0084A | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 5 Rev A                   | SBQZ    | Lindbergh Yellow | DVP-0070A | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 5 Rev C                   | SBQZ    | Lindbergh Yellow | DVP-0070C | ✓      | ✓      | ✓       |
+| Initial D Arcade Stage 5 Rev F                   | SBQZ    | Lindbergh Yellow | DVP-0070F | ✓      | ✓      | ✓       |
+| Let's Go Jungle                                  | SBLU    | Lindbergh Yellow | DVP-0011  | ✓      | ✓      | ✓       |
+| Let's Go Jungle!  Rev A                          | SBLU    | Lindbergh Yellow | DVP-0011A | ✓      | ✓      | ✓       |
+| Let's Go Jungle Special                          | SBNR    | Lindbergh Yellow | DVP-0036  | ✓      | ✓      | ✓       |
+| Outrun 2 SP SDX                                  | SBMB    | Lindbergh Yellow | DVP-0015  | ✓      | ✓      | ✓       |
+| Outrun 2 SP SDX Rev A                            | SBMB    | Lindbergh Yellow | DVP-0015A | ✓      | ✓      | ✓       |
+| Primeval Hunt                                    | SBPP    | Lindbergh Red    | DVP-0048  | ✓      | ✓      | ✓       |
+| RAMBO_SBQL                                       | SBQL    | Lindbergh Red EX | DVP-0069  | ✓      | ✓      | ✓       |
+| RAMBO_SBQL (China)                               | SBSS    | Lindbergh Red EX | DVP-0078  | ✓      | ✓      | ✓       |
+| The House of the Dead 4 Rev A                    | SBLC    | Lindbergh Yellow | DVP-0003A | ✓      | ✓      | ✓       |
+| The House of the Dead 4 Rev B                    | SBLC    | Lindbergh Yellow | DVP-0003B | ✓      | ✓      | ✓       |
+| The House of the Dead 4 Rev C                    | SBLC    | Lindbergh Yellow | DVP-0003C | ✓      | ✓      | ✓       |
+| The House of the Dead 4 Special                  | SBLS    | Lindbergh Yellow | DVP-0010  | ✓      | ✓      | ✓       |
+| The House of the Dead 4 Special Rev B            | SBLS    | Lindbergh Yellow | DVP-0010B | ✓      | ✓      | ✓       |
+| The House of the Dead EX                         | SBRC    | Lindbergh Red    | DVP-0063  | ✓      | ✓      | ✓       |
+| Too Spicy                                        | SBMV    | Lindbergh Red    | DVP-0027  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5                                 | SBLM    | Lindbergh Yellow | DVP-0008  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Rev A                           | SBLM    | Lindbergh Yellow | DVP-0008A | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Rev B                           | SBLM    | Lindbergh Yellow | DVP-0008B | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Rev E (Public Version C)        | SBLM    | Lindbergh Yellow | DVP-0008E | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Export                          | SBLM    | Lindbergh Yellow | DVP-0043  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Final Showdown REV A            | SBUV    | Lindbergh Yellow | DVP-5019  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Final Showdown REV B            | SBXX    | Lindbergh Yellow | DVP-5020  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 Final Showdown REV B ver 6.0000 | SBXX    | Lindbergh Yellow | DVP-5020  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 R                               | SBQU    | Lindbergh Yellow | DVP-5004  | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 R Rev D                         | SBQU    | Lindbergh Yellow | DVP-5004D | ✓      | ✓      | ✓       |
+| Virtua Fighter 5 R Rev G                         | SBQU    | Lindbergh Yellow | DVP-5004G | ✓      | ✓      | ✓       |
+| Virtua Tennis 3                                  | SBKX    | Lindbergh Yellow | DVP-0005  | ✓      | ✓      | ✓       |
+| Virtua Tennis 3 Rev A                            | SBKX    | Lindbergh Yellow | DVP-0005A | ✓      | ✓      | ✓       |
+| Virtua Tennis 3 Rev B                            | SBKX    | Lindbergh Yellow | DVP-0005B | ✓      | ✓      | ✓       |
+| Virtua Tennis 3 Rev C                            | SBKX    | Lindbergh Yellow | DVP-0005C | ✓      | ✓      | ✓       |
 
 ## Game Issues & Fixes
 

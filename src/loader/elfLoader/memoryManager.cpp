@@ -240,13 +240,28 @@ void *MemoryManager::customMalloc(size_t size)
     return _aligned_malloc(size, 16);
 }
 
+static const DWORD MALLINFO_CACHE_MS = 2000;
+
 struct mallinfo MemoryManager::customMallinfo(void)
 {
-    struct mallinfo Info = {};
+    // glibc's mallinfo() is a few counter reads; a HeapWalk under HeapLock is not,
+    // and some games call it every frame. Walk rarely and reuse the last snapshot.
+    static struct mallinfo cached = {};
+    static DWORD lastWalk = 0;
+    static LONG walking = 0;
+
+    if (lastWalk != 0 && GetTickCount() - lastWalk < MALLINFO_CACHE_MS)
+        return cached;
 
     HANDLE Heap = GetProcessHeap();
     if (!Heap)
-        return Info;
+        return cached;
+
+    // One walker at a time; latecomers get the previous snapshot.
+    if (InterlockedCompareExchange(&walking, 1, 0) != 0)
+        return cached;
+
+    struct mallinfo Info = {};
 
     HeapLock(Heap);
 
@@ -266,7 +281,12 @@ struct mallinfo MemoryManager::customMallinfo(void)
     HeapUnlock(Heap);
 
     Info.arena = Info.uordblks + Info.fordblks;
-    return Info;
+
+    cached = Info;
+    lastWalk = GetTickCount();
+
+    InterlockedExchange(&walking, 0);
+    return cached;
 }
 
 void MemoryManager::customFree(void *ptr)
