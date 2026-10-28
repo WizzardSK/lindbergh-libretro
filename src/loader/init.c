@@ -67,6 +67,11 @@ void initMain(char *configPath, char *controlsPath)
     if (freeplay && (!strcmp(freeplay, "0") || !strcmp(freeplay, "1")))
         getConfig()->freeplay = freeplay[0] - '0';
 
+    /* the libretro core's Debug options, over linuxloader.ini's */
+    const char *debugIni = getenv("LINDBERGH_LIBRETRO_INI");
+    if (debugIni && *debugIni)
+        applyIniLines(debugIni);
+
     /* the libretro core's saves/Lindbergh: the game's EEPROM and SRAM there,
      * named by its DVP, so a game's test program and the game itself
      * (JenTest and Jennifer, both DVP-0015) share them (NNshi). A path the

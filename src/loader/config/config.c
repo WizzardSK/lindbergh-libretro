@@ -499,6 +499,35 @@ void applyIniConfig(EmulatorConfig *config, const IniConfig *ini)
     }
 }
 
+void applyIniLines(const char *text)
+{
+    IniConfig *ini = calloc(1, sizeof(IniConfig));
+    if (!ini)
+        return;
+    char line[512];
+    for (const char *p = text; *p;)
+    {
+        const char *end = strchr(p, '\n');
+        size_t n = end ? (size_t)(end - p) : strlen(p);
+        if (n < sizeof(line))
+        {
+            memcpy(line, p, n);
+            line[n] = '\0';
+            char *slash = strchr(line, '/'), *eq = strchr(line, '=');
+            if (slash && eq && slash < eq)
+            {
+                *slash = '\0';
+                *eq = '\0';
+                iniSetValue(ini, line, slash + 1, eq + 1);
+                log_info("%s/%s = %s (libretro core option)", line, slash + 1, eq + 1);
+            }
+        }
+        p += n + (end ? 1 : 0);
+    }
+    applyIniConfig(&config, ini);
+    iniFree(ini);
+}
+
 int initConfig(const char *configFilePath)
 {
     setDefaultValues(&config);

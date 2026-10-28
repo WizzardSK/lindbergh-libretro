@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- New core option category Debug, last: the `linuxloader.ini` settings the core does not otherwise cover (EMULATE_DRIVEBOARD and the other boards, REGION, LINDBERGH_COLOUR, DEBUG_MSGS, USE_ALT_JVS_PASSTHROUGH, BOOST_RENDER_RES, the Graphics and GameSpecific switches, ID_CARDFILE_AUTOLOAD, the crosshair switches, ENABLE_NETWORK_PATCHES), each with Default first, which leaves the game's own value or the `linuxloader.ini`'s; a value set goes over the file's at the next start. Paths and cabinet IP addresses stay in `linuxloader.ini` (NNshi).
 - Merged upstream Linux Loader up to 4ffa095 (28.10.2026: graphics bridging, shader handling, audio, touch screen, pinned Mesa); its changes are in upstream's `docs/changelog` (NNshi).
 - README: Game folders, what After Burner Climax's and The House of the Dead 4's dumps need moved or renamed before they run, and NVIDIA's anisotropic filtering for the loader on Windows (NNshi).
 - A game's EEPROM and SRAM are kept in RetroArch's saves directory for the core (`saves/Lindbergh/` with saves sorted by core), named by the game's DVP (`DVP-0015.eeprom.bin`, `DVP-0015.sram.bin`), not in the folder of the ELF that runs: a game's test program and the game share them, so what OutRun 2 SP's JenTest sets reaches Jennifer. The `eeprom.bin` and `sram.bin` in the game's folder are copied there the first time; paths the `linuxloader.ini` sets stay as they are (NNshi).

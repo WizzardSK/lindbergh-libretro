@@ -35,6 +35,7 @@ Grouped into Video, Input, Audio and System, each with a tooltip; Steering Inner
 | Steering Inner Zone | 5 to 50% (25): with logarithmic, the share of the turn at the centre | on the fly |
 | Force Feedback to Rumble | enabled, disabled: the drive board's force feedback as rumble on player 1's pad (OutRun 2 SP SDX; other games only with `EMULATE_DRIVEBOARD = 1`) | on the fly |
 | Steering Effect | cubic (strong), square (weak): with logarithmic, the outer part's curve | on the fly |
+| Debug | every `linuxloader.ini` setting the core does not otherwise cover (board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
 | Audio Thread | disabled, enabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; off by default, as it loses OutRun 2 SP's announcer | at the next start of the content |
 
 ## Controls

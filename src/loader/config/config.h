@@ -361,6 +361,8 @@ extern "C" {
 #endif
 
 int initConfig(const char *configFilePath);
+/* linuxloader.ini settings given as "Section/KEY=value" lines, one per line, applied over the file's (the libretro core's Debug options) */
+void applyIniLines(const char *text);
 void setDefaultValues(EmulatorConfig *cfg);
 EmulatorConfig *getConfig();
 char *getGameName();
