@@ -67,11 +67,31 @@ static pid_t loader;
 #endif
 static uint32_t last_frame;
 static unsigned frame_w = 640, frame_h = 480;
-static bool test_mode;
+/* Input > Service and Test Buttons: L3 service and R3 test on the pads */
+static bool test_buttons = true;
+/* Whether the program running is in test mode: the game's separate test
+ * program, or the game with the loader's -t */
+static bool test_running;
+/* Frames since Test was pressed during play, UINT_MAX when it was not */
+static unsigned since_test = UINT_MAX;
+/* The game kept running 5 s after Test: its test menu is in the game itself
+ * (Initial D), so its quitting later is not for test mode */
+static bool test_in_game;
+/* Test (R3 or T) is kept from the program started next until it is let go:
+ * the press that left the test menu, still held, would be Test again at
+ * once (NNshi, OutRun 2 SP's JenTest) */
+static bool test_pad_held, test_key_held;
+/* How the loader ended: its exit code, -1 when it did not exit by itself */
+static int loader_status = -1;
+/* Frames the program running has run */
+static unsigned run_frames;
 /* The Audio Thread option: audio on RetroArch's audio thread */
 static bool audio_thread;
 /* The game of the content and where the loader runs it from */
 static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
+/* The game's separate test program (test_program), empty for a game whose
+ * test menu is in the game itself */
+static char s_test_elf[PATH_MAX];
 /* RetroArch's saves directory for the core (saves/Lindbergh when sorted by
  * core), where the loader keeps each game's EEPROM and SRAM by its DVP
  * (init.c); empty without one */
@@ -91,12 +111,13 @@ static float steering_inner = 0.25f;
 static int steering_power = 3;
 /* WIDTHxHEIGHT for the loader, or "native" for linuxloader.ini's */
 static char resolution[16] = "native";
-/* The Free Play option: "1" or "0" for the loader, NULL for the game's own */
-static const char *freeplay;
+/* Video > Force 16:9: the loader's KEEP_ASPECT_RATIO off (NNshi) */
+static bool force_widescreen;
 /* The Debug options: linuxloader.ini settings, each "default" to leave the
  * game's own or the linuxloader.ini's; the ones set go to the loader as
  * "Section/KEY=value" lines (init.c, applyIniLines) (NNshi) */
 static const struct { const char *option, *section, *key; } debug_settings[] = {
+    {"lindbergh_debug_freeplay", "Emulation", "FREEPLAY"},
     {"lindbergh_debug_emulate_driveboard", "Emulation", "EMULATE_DRIVEBOARD"},
     {"lindbergh_debug_emulate_motionboard", "Emulation", "EMULATE_MOTIONBOARD"},
     {"lindbergh_debug_emulate_rideboard", "Emulation", "EMULATE_RIDEBOARD"},
@@ -108,7 +129,6 @@ static const struct { const char *option, *section, *key; } debug_settings[] = {
     {"lindbergh_debug_debug_msgs", "System", "DEBUG_MSGS"},
     {"lindbergh_debug_use_alt_jvs_passthrough", "System", "USE_ALT_JVS_PASSTHROUGH"},
     {"lindbergh_debug_boost_render_res", "Display", "BOOST_RENDER_RES"},
-    {"lindbergh_debug_keep_aspect_ratio", "Display", "KEEP_ASPECT_RATIO"},
     {"lindbergh_debug_hummer_flicker_fix", "Graphics", "HUMMER_FLICKER_FIX"},
     {"lindbergh_debug_lgj_render_with_mesa", "Graphics", "LGJ_RENDER_WITH_MESA"},
     {"lindbergh_debug_disable_builtin_font", "Graphics", "DISABLE_BUILTIN_FONT"},
@@ -162,7 +182,7 @@ static bool update_option_display(void);
 
 static void read_options(void)
 {
-    test_mode = !strcmp(get_option("lindbergh_test_mode", "disabled"), "enabled");
+    test_buttons = strcmp(get_option("lindbergh_test_buttons", "enabled"), "disabled") != 0;
     audio_thread = strcmp(get_option("lindbergh_audio_thread", "enabled"), "disabled") != 0;
     gun_stick = strcmp(get_option("lindbergh_gun_aim", "stick"), "mouse") != 0;
     gun_speed = atoi(get_option("lindbergh_gun_sensitivity", "100")) / 100.0f;
@@ -178,8 +198,7 @@ static void read_options(void)
     if (environ_cb)
         update_option_display();
     snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
-    const char *fp = get_option("lindbergh_freeplay", "default");
-    freeplay = !strcmp(fp, "enabled") ? "1" : !strcmp(fp, "disabled") ? "0" : NULL;
+    force_widescreen = !strcmp(get_option("lindbergh_force_widescreen", "disabled"), "enabled");
     size_t used = 0;
     debug_ini[0] = 0;
     for (size_t i = 0; i < sizeof(debug_settings) / sizeof(debug_settings[0]); i++)
@@ -192,15 +211,16 @@ static void read_options(void)
         if (n > 0 && used + n < sizeof(debug_ini))
             used += n;
     }
+    if (force_widescreen && used + 32 < sizeof(debug_ini))
+        used += snprintf(debug_ini + used, sizeof(debug_ini) - used, "Display/KEEP_ASPECT_RATIO=0\n");
 }
 
 /* The core options, with their tooltips (RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2;
  * a frontend without it gets them as plain variables, built from these) */
 static struct retro_core_option_v2_category option_categories[] = {
-    {"video", "Video", "The resolution the games render at."},
+    {"video", "Video", "The resolution the games render at, and widescreen."},
     {"input", "Input", "The guns, steering and force feedback."},
     {"audio", "Audio", "How the sound reaches RetroArch."},
-    {"system", "System", "Test mode and free play."},
     {"debug", "Debug (Restart)", "linuxloader.ini's settings. Default leaves the game's own or the linuxloader.ini's."},
     {NULL, NULL, NULL},
 };
@@ -211,6 +231,16 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      NULL, "video",
      {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
      "native"},
+    {"lindbergh_force_widescreen", "Force 16:9 (Restart)", NULL,
+     "Makes every game run in widescreen. May break or stretch some games.",
+     NULL, "video",
+     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
+     "disabled"},
+    {"lindbergh_test_buttons", "Service and Test Buttons", NULL,
+     "L3 as the cabinet's Service button and R3 as its Test button, on both pads. Disabled keeps them from being pressed by accident; the keyboard's S and T stay.",
+     NULL, "input",
+     {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+     "enabled"},
     {"lindbergh_gun_aim", "Gun Aim", NULL,
      "What aims in the gun games, for both players. Analog Stick: each player's left stick (or D-pad) moves the aim, R2 fires, R reloads, L2 is the gun's button, L shakes the gun in The House of the Dead 4. Too Spicy: L2 reloads, L and R are the pedals. Ghost Squad Evolution: L2 is Action, L is Change. Primeval Hunt: L2 pumps. Mouse: RetroArch's light gun on each player's port, which follows the mouse; left button fires, right reloads, middle is the gun's button, aiming off the picture reloads too. Ghost Squad Evolution: right is Action, middle is Change. The House of the Dead 4: right is the gun's button, middle shakes. Too Spicy: middle is the left pedal, right the right one. Primeval Hunt: middle pumps, and the touch screen takes the mouse's clicks.",
      NULL, "input",
@@ -253,15 +283,8 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      NULL, "audio",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_test_mode", "Test Mode (Restart)", NULL,
-     "Starts the game in test mode, as the loader's -t does.",
-     NULL, "system",
-     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
-     "disabled"},
-    {"lindbergh_freeplay", "Free Play (Restart)", NULL,
-     "Default leaves the game's own setting. Enabled or Disabled writes it to the game's EEPROM at start, as the linuxloader.ini's FREEPLAY does.",
-     NULL, "system",
-     {{"default", "Default"}, {"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+    {"lindbergh_debug_freeplay", "FREEPLAY", NULL, NULL, NULL, "debug",
+     {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_emulate_driveboard", "EMULATE_DRIVEBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
@@ -294,11 +317,6 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_boost_render_res", "BOOST_RENDER_RES", NULL, NULL, NULL, "debug",
-     {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
-     "default"},
-    {"lindbergh_debug_keep_aspect_ratio", "KEEP_ASPECT_RATIO", NULL,
-     "On: After Burner Climax and Ghost Squad Evolution render 4:3, as their cabinets were. Off: widescreen.",
-     NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_hummer_flicker_fix", "HUMMER_FLICKER_FIX", NULL, NULL, NULL, "debug",
@@ -606,13 +624,17 @@ static bool loader_exited(void)
 #ifdef _WIN32
     if (loader && WaitForSingleObject(loader, 0) == WAIT_OBJECT_0)
     {
+        DWORD code = 0;
+        loader_status = GetExitCodeProcess(loader, &code) ? (int)code : -1;
         CloseHandle(loader);
         loader = NULL;
         return true;
     }
 #else
-    if (loader > 0 && waitpid(loader, NULL, WNOHANG) == loader)
+    int status;
+    if (loader > 0 && waitpid(loader, &status, WNOHANG) == loader)
     {
+        loader_status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
         loader = 0;
         return true;
     }
@@ -693,6 +715,14 @@ static uint32_t sdl_scancode(unsigned key)
     }
 }
 
+/* Test during play: the game gets it too; one that quits for it is started
+ * again in test mode (retro_run) */
+static void test_pressed(void)
+{
+    if (!test_running && !test_in_game && since_test == UINT_MAX)
+        since_test = 0;
+}
+
 /* RetroArch's keyboard into the loader's key queue, which it turns into
  * SDL key events (libretroBridge.c) */
 static void keyboard_event(bool down, unsigned keycode, uint32_t character, uint16_t key_modifiers)
@@ -701,6 +731,17 @@ static void keyboard_event(bool down, unsigned keycode, uint32_t character, uint
     uint32_t scancode = sdl_scancode(keycode);
     if (!shm || !scancode)
         return;
+    if (keycode == RETROK_t)
+    {
+        if (test_key_held)
+        {
+            if (!down)
+                test_key_held = false;
+            return;
+        }
+        if (down)
+            test_pressed();
+    }
     uint32_t head = shm->key_head;
     if (head - shm->key_tail >= LR_KEY_QUEUE)
         return;
@@ -812,13 +853,19 @@ static bool install_loader(const char *root)
 #endif
 }
 
-/* The separate test program of a game whose test menu is not in the game
- * itself, which the loader's -t runs only for the names without an
- * extension (mainShared.c, testModePath): OutRun 2 SP's JenTest in a
- * JenTest folder beside Jennifer's, Virtua Tennis 3's vt3_testmode beside
- * vt3_Lindbergh, with the extension the game has (".elf", NNshi) */
+/* The separate test program of a game that has one, as the loader's -t has
+ * them for the names it knows (mainShared.c, testModePath), with or without
+ * the extension the game has (".elf", NNshi): beside the game, and OutRun 2
+ * SP's JenTest in a JenTest folder beside Jennifer's */
 static bool test_program(const char *elf, char *out, size_t size)
 {
+    static const struct { const char *game, *test; } programs[] = {
+        {"Jennifer", "..%cJenTest%cJenTest"},
+        {"vt3_Lindbergh", "vt3_testmode"},
+        {"hod4M", "hod4testM"},
+        {"hodexRI", "hodextestR"},
+        {"apacheM", "apachetestM"},
+    };
     char dir[PATH_MAX];
     snprintf(dir, sizeof(dir), "%s", elf);
     char *slash = last_separator(dir);
@@ -831,35 +878,39 @@ static bool test_program(const char *elf, char *out, size_t size)
     const size_t stem = ext ? (size_t)(ext - base) : strlen(base);
     if (!ext)
         ext = "";
-    if (stem == 8 && !strncmp(base, "Jennifer", 8))
-        snprintf(out, size, "%s%c..%cJenTest%cJenTest%s", dir, sep, sep, sep, ext);
-    else if (stem == 13 && !strncmp(base, "vt3_Lindbergh", 13))
-        snprintf(out, size, "%s%cvt3_testmode%s", dir, sep, ext);
-    else
-        return false;
-    return access(out, R_OK) == 0;
+    for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++)
+    {
+        if (stem != strlen(programs[i].game) || strncmp(base, programs[i].game, stem))
+            continue;
+        char test[64];
+        snprintf(test, sizeof(test), programs[i].test, sep, sep);
+        snprintf(out, size, "%s%c%s%s", dir, sep, test, ext);
+        return access(out, R_OK) == 0;
+    }
+    return false;
 }
 
 /* The loader started on the game of the content */
 static bool start_loader(void)
 {
     const char *elf = s_elf, *dir = s_dir, *root = s_root;
-    /* Test Mode: the separate test program where the game has one, or the
-     * game with the loader's -t */
-    char test_elf[PATH_MAX], test_dir[PATH_MAX];
-    bool test_flag = test_mode;
-    if (test_mode && test_program(s_elf, test_elf, sizeof(test_elf)))
+    /* test mode, after Test (retro_run): the game's separate test program,
+     * or the game with the loader's -t */
+    char test_dir[PATH_MAX];
+    const bool test_flag = test_running && !s_test_elf[0];
+    if (test_running && s_test_elf[0])
     {
         /* run from its own folder, as the game from its */
-        snprintf(test_dir, sizeof(test_dir), "%s", test_elf);
+        snprintf(test_dir, sizeof(test_dir), "%s", s_test_elf);
         char *cut = last_separator(test_dir);
         if (cut)
             *cut = 0;
-        elf = test_elf;
+        elf = s_test_elf;
         dir = test_dir;
-        test_flag = false;
-        lr_log(RETRO_LOG_INFO, "test mode: %s\n", test_elf);
+        lr_log(RETRO_LOG_INFO, "test mode: %s\n", s_test_elf);
     }
+    run_frames = 0;
+    test_in_game = false;
 #ifdef _WIN32
     char exe[PATH_MAX];
     snprintf(exe, sizeof(exe), "%s\\linuxloader.exe", root);
@@ -898,8 +949,6 @@ static bool start_loader(void)
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", "dummy");
     /* the Resolution option, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", strcmp(resolution, "native") ? resolution : NULL);
-    /* the Free Play option, over linuxloader.ini's (init.c) */
-    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", freeplay);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", s_saves[0] ? s_saves : NULL);
     /* the Debug options, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_INI", debug_ini[0] ? debug_ini : NULL);
@@ -909,7 +958,6 @@ static bool start_loader(void)
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", NULL);
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", NULL);
-    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_INI", NULL);
     if (log_file != INVALID_HANDLE_VALUE)
@@ -965,9 +1013,6 @@ static bool start_loader(void)
         /* the Resolution option, over linuxloader.ini's (init.c) */
         if (strcmp(resolution, "native"))
             setenv("LINDBERGH_LIBRETRO_RESOLUTION", resolution, 1);
-        /* the Free Play option, over linuxloader.ini's (init.c) */
-        if (freeplay)
-            setenv("LINDBERGH_LIBRETRO_FREEPLAY", freeplay, 1);
         if (s_saves[0])
             setenv("LINDBERGH_LIBRETRO_SAVES", s_saves, 1);
         /* the Debug options, over linuxloader.ini's (init.c) */
@@ -1065,6 +1110,11 @@ bool retro_load_game(const struct retro_game_info *game)
 snprintf(s_elf, sizeof(s_elf), "%s", elf);
     snprintf(s_dir, sizeof(s_dir), "%s", dir);
     snprintf(s_root, sizeof(s_root), "%s", root);
+    if (!test_program(s_elf, s_test_elf, sizeof(s_test_elf)))
+        s_test_elf[0] = 0;
+    test_running = false;
+    since_test = UINT_MAX;
+    test_pad_held = test_key_held = false;
     return start_loader();
 }
 
@@ -1328,12 +1378,22 @@ static void write_input(void)
         {RETRO_DEVICE_ID_JOYPAD_LEFT, LR_PAD_LEFT}, {RETRO_DEVICE_ID_JOYPAD_RIGHT, LR_PAD_RIGHT},
     };
     input_poll_cb();
+    bool test_still_held = false;
     for (unsigned p = 0; p < LR_PLAYERS; p++)
     {
         uint32_t buttons = 0;
         for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
             if (input_state_cb(p, RETRO_DEVICE_JOYPAD, 0, map[i].retro))
                 buttons |= 1u << map[i].lr;
+        if (!test_buttons)
+            buttons &= ~((1u << LR_PAD_LSTICK) | (1u << LR_PAD_RSTICK));
+        if (test_pad_held && (buttons & (1u << LR_PAD_RSTICK)))
+        {
+            buttons &= ~(1u << LR_PAD_RSTICK);
+            test_still_held = true;
+        }
+        if (buttons & (1u << LR_PAD_RSTICK))
+            test_pressed();
         LrPad pad = {buttons, {0}};
         pad.axes[LR_AXIS_LX] = axis(p, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
         if (steering_log)
@@ -1345,6 +1405,8 @@ static void write_input(void)
         pad.axes[LR_AXIS_RT] = trigger(p, RETRO_DEVICE_ID_JOYPAD_R2);
         shm->pads[p] = pad;
     }
+    if (!test_still_held)
+        test_pad_held = false;
 
     /* the pointer over the picture, -0x7fff..0x7fff across the content:
      * RetroArch's light gun, which follows the mouse, or its pointer while
@@ -1544,10 +1606,57 @@ void retro_run(void)
     for (int waited = 0; shm->frame_seq == last_frame && waited < 100; waited += 10)
         lrWait(frame_event, &shm->frame_seq, last_frame, 10);
 
-    if (loader_exited())
+    run_frames++;
+    if (since_test != UINT_MAX)
+        since_test++;
+    bool exited = loader_exited();
+    /* Test makes most games save their bookkeeping and quit, and the cabinet
+     * then starts them in test mode (Rambo, VF5, NNshi), OutRun 2 SP and
+     * Virtua Tennis 3 as their separate test programs. A game with a test
+     * program that has not quit 5 s after Test is ended here; any other
+     * that kept running has its test menu in the game. */
+    if (!exited && since_test != UINT_MAX && since_test >= 300)
     {
-        lr_log(RETRO_LOG_ERROR, "the game exited\n");
+        since_test = UINT_MAX;
+        if (s_test_elf[0])
+        {
+            lr_log(RETRO_LOG_INFO, "the game did not quit after Test: ended\n");
+            stop_loader();
+            exited = true;
+            since_test = 0;
+        }
+        else
+            test_in_game = true;
+    }
+    if (exited)
+    {
+        /* As a cabinet: after Test into the test program, and out of a test
+         * menu (the test program's, or one in the game, which quits the
+         * game) into the game again; a game that quits by itself after its
+         * first 10 s is started again too (NNshi) */
+        const bool to_test = since_test != UINT_MAX;
+        if (to_test || test_running || (loader_status == 0 && run_frames > 600))
+        {
+            lr_log(RETRO_LOG_INFO, "the %s quit (status %d): started again %s\n",
+                   test_running ? "test program" : "game", loader_status,
+                   to_test ? "in test mode" : "for play");
+            test_running = to_test;
+            since_test = UINT_MAX;
+            test_pad_held = test_key_held = true;
+            close_shm();
+            if (start_loader())
+            {
+                video_cb(NULL, frame_w, frame_h, 0);
+                return;
+            }
+        }
+        lr_log(RETRO_LOG_ERROR, "the game exited (status %d)\n", loader_status);
         environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+        if (!shm)
+        {
+            video_cb(NULL, frame_w, frame_h, 0);
+            return;
+        }
     }
 
     if (shm->frame_seq != last_frame && shm->width && shm->height)
