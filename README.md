@@ -27,8 +27,8 @@ Grouped into Video, Input, Audio and System, each with a tooltip; Steering Inner
 
 | Option | Values | Takes effect |
 |---|---|---|
-| Test Mode | disabled, enabled: the game started in test mode, as the loader's `-t` does; OutRun 2 SP SDX and Virtua Tennis 3 start their separate test programs, JenTest (in a JenTest folder beside Jennifer's) and vt3_testmode (beside vt3_Lindbergh), with or without `.elf` | at the next start of the content |
 | Resolution | native (the `linuxloader.ini`'s), 1280x720, 1920x1080, 2560x1440, 3840x2160, 5120x2880: the size the games the loader can patch render at; every frame goes through system memory to RetroArch, so the highest ones cost speed | at the next start of the content |
+| Service and Test Buttons | enabled, disabled: L3 as the cabinet's Service button and R3 as its Test button on both pads; disabled keeps them from being pressed by accident, the keyboard's S and T stay | on the fly |
 | Gun Aim | stick, mouse: what aims in the gun games for both players. Analog Stick: each player's left stick or D-pad moves the aim, R2 fires, R reloads, L2 is the gun's button, L shakes the gun in The House of the Dead 4; Too Spicy: L2 reloads, L and R are the pedals; Ghost Squad Evolution: L2 Action, L Change; Primeval Hunt: L2 pumps. Mouse: RetroArch's light gun on each player's port, which follows the mouse; left button fires, right reloads, middle is the gun's button, off the picture reloads too; Ghost Squad Evolution: right Action, middle Change; The House of the Dead 4: right the gun's button, middle shakes; Too Spicy: middle the left pedal, right the right one; Primeval Hunt: middle pumps, the touch screen takes the clicks | on the fly |
 | Gun Pointer Sensitivity | 50 to 200% (100): how fast the sticks move the aim, as fast across as up and down; at 100% a full tilt crosses the picture's height in about a second | on the fly |
 | Crosshair | enabled, disabled: the gun games' crosshairs over the picture, blue for player 1, red for player 2 (shown once that player aims) | on the fly |
@@ -44,8 +44,9 @@ Grouped into Video, Input, Audio and System, each with a tooltip; Steering Inner
 
 Without a `controls.ini`, the loader's defaults:
 
-- Pads: RetroArch's ports 1 and 2 are players 1 and 2; Start is start, Select a coin, L3 service and R3 test. The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
+- Pads: RetroArch's ports 1 and 2 are players 1 and 2; Start is start, Select a coin, L3 service and R3 test (unless Service and Test Buttons is off). The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
 - Keyboard: RetroArch's keyboard is the game's: 5 and 6 coin, 1 and 2 start, T test, S service, the arrows.
+- Test menu: Test (R3 or T) during play opens it, as on a cabinet: in the game itself, or for OutRun 2 SP SDX and Virtua Tennis 3 their separate test programs, which the core starts once the game has quit for it (ended after 5 s if it does not): JenTest (in a JenTest folder beside Jennifer's) and vt3_testmode (beside vt3_Lindbergh), with or without `.elf`. Leaving the test menu starts the game again, and so does a game that quits by itself after its first 10 s.
 - Guns: both players, by the Gun Aim option (the sticks by default). Every gun game needs its guns calibrated in the test menu (R3) before it plays right. Too Spicy's pedals are on the keyboard's left and right arrows as well.
 - Touch screens: RetroArch's light gun, which follows the mouse, or its pointer while touched; the mouse's buttons click.
 - Rumble: the drive board's force feedback, which the loader turns into left and right rumble, reaches player 1's pad (OutRun 2 SP; Initial D runs without the drive board's emulation, `EMULATE_DRIVEBOARD`).
