@@ -62,11 +62,6 @@ void initMain(char *configPath, char *controlsPath)
         getConfig()->height = resolutionH;
     }
 
-    /* the libretro core's Free Play option, over linuxloader.ini's */
-    const char *freeplay = getenv("LINDBERGH_LIBRETRO_FREEPLAY");
-    if (freeplay && (!strcmp(freeplay, "0") || !strcmp(freeplay, "1")))
-        getConfig()->freeplay = freeplay[0] - '0';
-
     /* the libretro core's Debug options, over linuxloader.ini's */
     const char *debugIni = getenv("LINDBERGH_LIBRETRO_INI");
     if (debugIni && *debugIni)

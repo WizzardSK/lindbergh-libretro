@@ -111,12 +111,13 @@ static float steering_inner = 0.25f;
 static int steering_power = 3;
 /* WIDTHxHEIGHT for the loader, or "native" for linuxloader.ini's */
 static char resolution[16] = "native";
-/* The Free Play option: "1" or "0" for the loader, NULL for the game's own */
-static const char *freeplay;
+/* Video > Force 16:9: the loader's KEEP_ASPECT_RATIO off (NNshi) */
+static bool force_widescreen;
 /* The Debug options: linuxloader.ini settings, each "default" to leave the
  * game's own or the linuxloader.ini's; the ones set go to the loader as
  * "Section/KEY=value" lines (init.c, applyIniLines) (NNshi) */
 static const struct { const char *option, *section, *key; } debug_settings[] = {
+    {"lindbergh_debug_freeplay", "Emulation", "FREEPLAY"},
     {"lindbergh_debug_emulate_driveboard", "Emulation", "EMULATE_DRIVEBOARD"},
     {"lindbergh_debug_emulate_motionboard", "Emulation", "EMULATE_MOTIONBOARD"},
     {"lindbergh_debug_emulate_rideboard", "Emulation", "EMULATE_RIDEBOARD"},
@@ -128,7 +129,6 @@ static const struct { const char *option, *section, *key; } debug_settings[] = {
     {"lindbergh_debug_debug_msgs", "System", "DEBUG_MSGS"},
     {"lindbergh_debug_use_alt_jvs_passthrough", "System", "USE_ALT_JVS_PASSTHROUGH"},
     {"lindbergh_debug_boost_render_res", "Display", "BOOST_RENDER_RES"},
-    {"lindbergh_debug_keep_aspect_ratio", "Display", "KEEP_ASPECT_RATIO"},
     {"lindbergh_debug_hummer_flicker_fix", "Graphics", "HUMMER_FLICKER_FIX"},
     {"lindbergh_debug_lgj_render_with_mesa", "Graphics", "LGJ_RENDER_WITH_MESA"},
     {"lindbergh_debug_disable_builtin_font", "Graphics", "DISABLE_BUILTIN_FONT"},
@@ -198,8 +198,7 @@ static void read_options(void)
     if (environ_cb)
         update_option_display();
     snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
-    const char *fp = get_option("lindbergh_freeplay", "default");
-    freeplay = !strcmp(fp, "enabled") ? "1" : !strcmp(fp, "disabled") ? "0" : NULL;
+    force_widescreen = !strcmp(get_option("lindbergh_force_widescreen", "disabled"), "enabled");
     size_t used = 0;
     debug_ini[0] = 0;
     for (size_t i = 0; i < sizeof(debug_settings) / sizeof(debug_settings[0]); i++)
@@ -212,15 +211,16 @@ static void read_options(void)
         if (n > 0 && used + n < sizeof(debug_ini))
             used += n;
     }
+    if (force_widescreen && used + 32 < sizeof(debug_ini))
+        used += snprintf(debug_ini + used, sizeof(debug_ini) - used, "Display/KEEP_ASPECT_RATIO=0\n");
 }
 
 /* The core options, with their tooltips (RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2;
  * a frontend without it gets them as plain variables, built from these) */
 static struct retro_core_option_v2_category option_categories[] = {
-    {"video", "Video", "The resolution the games render at."},
+    {"video", "Video", "The resolution the games render at, and widescreen."},
     {"input", "Input", "The guns, steering and force feedback."},
     {"audio", "Audio", "How the sound reaches RetroArch."},
-    {"system", "System", "Free play."},
     {"debug", "Debug (Restart)", "linuxloader.ini's settings. Default leaves the game's own or the linuxloader.ini's."},
     {NULL, NULL, NULL},
 };
@@ -231,6 +231,11 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      NULL, "video",
      {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
      "native"},
+    {"lindbergh_force_widescreen", "Force 16:9 (Restart)", NULL,
+     "Makes every game run in widescreen. May break or stretch some games.",
+     NULL, "video",
+     {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
+     "disabled"},
     {"lindbergh_test_buttons", "Service and Test Buttons", NULL,
      "L3 as the cabinet's Service button and R3 as its Test button, on both pads. Disabled keeps them from being pressed by accident; the keyboard's S and T stay.",
      NULL, "input",
@@ -278,10 +283,8 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      NULL, "audio",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_freeplay", "Free Play (Restart)", NULL,
-     "Default leaves the game's own setting. Enabled or Disabled writes it to the game's EEPROM at start, as the linuxloader.ini's FREEPLAY does.",
-     NULL, "system",
-     {{"default", "Default"}, {"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
+    {"lindbergh_debug_freeplay", "FREEPLAY", NULL, NULL, NULL, "debug",
+     {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_emulate_driveboard", "EMULATE_DRIVEBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
@@ -314,11 +317,6 @@ static struct retro_core_option_v2_definition option_definitions[] = {
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_boost_render_res", "BOOST_RENDER_RES", NULL, NULL, NULL, "debug",
-     {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
-     "default"},
-    {"lindbergh_debug_keep_aspect_ratio", "KEEP_ASPECT_RATIO", NULL,
-     "On: After Burner Climax and Ghost Squad Evolution render 4:3, as their cabinets were. Off: widescreen.",
-     NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     {"lindbergh_debug_hummer_flicker_fix", "HUMMER_FLICKER_FIX", NULL, NULL, NULL, "debug",
@@ -951,8 +949,6 @@ static bool start_loader(void)
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", "dummy");
     /* the Resolution option, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", strcmp(resolution, "native") ? resolution : NULL);
-    /* the Free Play option, over linuxloader.ini's (init.c) */
-    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", freeplay);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", s_saves[0] ? s_saves : NULL);
     /* the Debug options, over linuxloader.ini's (init.c) */
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_INI", debug_ini[0] ? debug_ini : NULL);
@@ -962,7 +958,6 @@ static bool start_loader(void)
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SHM", NULL);
     SetEnvironmentVariableA("SDL_AUDIO_DRIVER", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_RESOLUTION", NULL);
-    SetEnvironmentVariableA("LINDBERGH_LIBRETRO_FREEPLAY", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_SAVES", NULL);
     SetEnvironmentVariableA("LINDBERGH_LIBRETRO_INI", NULL);
     if (log_file != INVALID_HANDLE_VALUE)
@@ -1018,9 +1013,6 @@ static bool start_loader(void)
         /* the Resolution option, over linuxloader.ini's (init.c) */
         if (strcmp(resolution, "native"))
             setenv("LINDBERGH_LIBRETRO_RESOLUTION", resolution, 1);
-        /* the Free Play option, over linuxloader.ini's (init.c) */
-        if (freeplay)
-            setenv("LINDBERGH_LIBRETRO_FREEPLAY", freeplay, 1);
         if (s_saves[0])
             setenv("LINDBERGH_LIBRETRO_SAVES", s_saves, 1);
         /* the Debug options, over linuxloader.ini's (init.c) */
