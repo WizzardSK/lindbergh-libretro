@@ -69,11 +69,14 @@ static uint32_t last_frame;
 static unsigned frame_w = 640, frame_h = 480;
 /* Input > Service and Test Buttons: L3 service and R3 test on the pads */
 static bool test_buttons = true;
-/* Whether the program running is the game's separate test program */
+/* Whether the program running is in test mode: the game's separate test
+ * program, or the game with the loader's -t */
 static bool test_running;
-/* Frames since Test was pressed during play of a game with a separate test
- * program, UINT_MAX when it was not */
+/* Frames since Test was pressed during play, UINT_MAX when it was not */
 static unsigned since_test = UINT_MAX;
+/* The game kept running 5 s after Test: its test menu is in the game itself
+ * (Initial D), so its quitting later is not for test mode */
+static bool test_in_game;
 /* Test (R3 or T) is kept from the program started next until it is let go:
  * the press that left the test menu, still held, would be Test again at
  * once (NNshi, OutRun 2 SP's JenTest) */
@@ -714,12 +717,11 @@ static uint32_t sdl_scancode(unsigned key)
     }
 }
 
-/* Test during play of a game with a separate test program: the game gets
- * it too, and the core starts the test program once the game has quit for
- * it (retro_run) */
+/* Test during play: the game gets it too; one that quits for it is started
+ * again in test mode (retro_run) */
 static void test_pressed(void)
 {
-    if (!test_running && s_test_elf[0] && since_test == UINT_MAX)
+    if (!test_running && !test_in_game && since_test == UINT_MAX)
         since_test = 0;
 }
 
@@ -853,13 +855,19 @@ static bool install_loader(const char *root)
 #endif
 }
 
-/* The separate test program of a game whose test menu is not in the game
- * itself, as the loader's -t has them for the names without an extension
- * (mainShared.c, testModePath): OutRun 2 SP's JenTest in a
- * JenTest folder beside Jennifer's, Virtua Tennis 3's vt3_testmode beside
- * vt3_Lindbergh, with the extension the game has (".elf", NNshi) */
+/* The separate test program of a game that has one, as the loader's -t has
+ * them for the names it knows (mainShared.c, testModePath), with or without
+ * the extension the game has (".elf", NNshi): beside the game, and OutRun 2
+ * SP's JenTest in a JenTest folder beside Jennifer's */
 static bool test_program(const char *elf, char *out, size_t size)
 {
+    static const struct { const char *game, *test; } programs[] = {
+        {"Jennifer", "..%cJenTest%cJenTest"},
+        {"vt3_Lindbergh", "vt3_testmode"},
+        {"hod4M", "hod4testM"},
+        {"hodexRI", "hodextestR"},
+        {"apacheM", "apachetestM"},
+    };
     char dir[PATH_MAX];
     snprintf(dir, sizeof(dir), "%s", elf);
     char *slash = last_separator(dir);
@@ -872,22 +880,27 @@ static bool test_program(const char *elf, char *out, size_t size)
     const size_t stem = ext ? (size_t)(ext - base) : strlen(base);
     if (!ext)
         ext = "";
-    if (stem == 8 && !strncmp(base, "Jennifer", 8))
-        snprintf(out, size, "%s%c..%cJenTest%cJenTest%s", dir, sep, sep, sep, ext);
-    else if (stem == 13 && !strncmp(base, "vt3_Lindbergh", 13))
-        snprintf(out, size, "%s%cvt3_testmode%s", dir, sep, ext);
-    else
-        return false;
-    return access(out, R_OK) == 0;
+    for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++)
+    {
+        if (stem != strlen(programs[i].game) || strncmp(base, programs[i].game, stem))
+            continue;
+        char test[64];
+        snprintf(test, sizeof(test), programs[i].test, sep, sep);
+        snprintf(out, size, "%s%c%s%s", dir, sep, test, ext);
+        return access(out, R_OK) == 0;
+    }
+    return false;
 }
 
 /* The loader started on the game of the content */
 static bool start_loader(void)
 {
     const char *elf = s_elf, *dir = s_dir, *root = s_root;
-    /* the game's separate test program, after Test (retro_run) */
+    /* test mode, after Test (retro_run): the game's separate test program,
+     * or the game with the loader's -t */
     char test_dir[PATH_MAX];
-    if (test_running)
+    const bool test_flag = test_running && !s_test_elf[0];
+    if (test_running && s_test_elf[0])
     {
         /* run from its own folder, as the game from its */
         snprintf(test_dir, sizeof(test_dir), "%s", s_test_elf);
@@ -899,6 +912,7 @@ static bool start_loader(void)
         lr_log(RETRO_LOG_INFO, "test mode: %s\n", s_test_elf);
     }
     run_frames = 0;
+    test_in_game = false;
 #ifdef _WIN32
     char exe[PATH_MAX];
     snprintf(exe, sizeof(exe), "%s\\linuxloader.exe", root);
@@ -921,7 +935,7 @@ static bool start_loader(void)
                                   FILE_ATTRIBUTE_NORMAL, NULL);
 
     char cmdline[PATH_MAX * 2 + 16];
-    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\"", exe, elf);
+    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\"%s", exe, elf, test_flag ? " -t" : "");
     STARTUPINFOA si = {sizeof(si)};
     PROCESS_INFORMATION pi = {0};
     if (log_file != INVALID_HANDLE_VALUE)
@@ -1020,9 +1034,15 @@ static bool start_loader(void)
         setenv("LD_LIBRARY_PATH", libs, 1);
         setenv("BOX64_LD_LIBRARY_PATH", libs, 1);
         setenv("BOX64_LOG", "1", 0);
-        execl(box64, box64, launcher, elf, (char *)NULL);
+        if (test_flag)
+            execl(box64, box64, launcher, elf, "-t", (char *)NULL);
+        else
+            execl(box64, box64, launcher, elf, (char *)NULL);
 #else
-        execl(apprun, apprun, elf, (char *)NULL);
+        if (test_flag)
+            execl(apprun, apprun, elf, "-t", (char *)NULL);
+        else
+            execl(apprun, apprun, elf, (char *)NULL);
 #endif
         _exit(127);
     }
@@ -1598,14 +1618,23 @@ void retro_run(void)
     if (since_test != UINT_MAX)
         since_test++;
     bool exited = loader_exited();
-    /* Test makes OutRun 2 SP save its bookkeeping and quit, and the cabinet
-     * then starts its test program; a game with a test program that has not
-     * quit 5 s after Test is ended here */
+    /* Test makes most games save their bookkeeping and quit, and the cabinet
+     * then starts them in test mode (Rambo, VF5, NNshi), OutRun 2 SP and
+     * Virtua Tennis 3 as their separate test programs. A game with a test
+     * program that has not quit 5 s after Test is ended here; any other
+     * that kept running has its test menu in the game. */
     if (!exited && since_test != UINT_MAX && since_test >= 300)
     {
-        lr_log(RETRO_LOG_INFO, "the game did not quit after Test: ended\n");
-        stop_loader();
-        exited = true;
+        since_test = UINT_MAX;
+        if (s_test_elf[0])
+        {
+            lr_log(RETRO_LOG_INFO, "the game did not quit after Test: ended\n");
+            stop_loader();
+            exited = true;
+            since_test = 0;
+        }
+        else
+            test_in_game = true;
     }
     if (exited)
     {
@@ -1625,8 +1654,6 @@ void retro_run(void)
             close_shm();
             if (start_loader())
             {
-                struct retro_message msg = {test_running ? "Lindbergh: test mode" : "Lindbergh: back to the game", 180};
-                environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
                 video_cb(NULL, frame_w, frame_h, 0);
                 return;
             }
