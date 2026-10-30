@@ -5,9 +5,6 @@
 #include "symbolResolver.hpp"
 #include "linuxStack.hpp"
 #include "libcBridge.hpp"
-extern "C" {
-#include "../libretro/libretroBridge.h"
-}
 #include <elfio.hpp>
 #include <cstring>
 #include <cstdlib>
@@ -362,10 +359,6 @@ bool ElfLoader::LoadDependencies()
 
         SymbolResolver::GetInstance().RegisterLibrary("libopenal.so.0", "openal32.dll");
         SymbolResolver::GetInstance().RegisterLibrary("libopenal.so.1", "openal32.dll");
-        // the libretro core's: the game's OpenAL device, a loopback one
-        libretroOpenALSymbols([](const char *name, void *ours, void **original) {
-            SymbolResolver::GetInstance().RegisterVTable(name, ours, original);
-        });
         SymbolResolver::GetInstance().RegisterLibrary("libCg.so", "Cg.dll");
         SymbolResolver::GetInstance().RegisterLibrary("libCgGL.so", "CgGL.dll");
 

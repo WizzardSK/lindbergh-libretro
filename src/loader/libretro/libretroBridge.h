@@ -26,10 +26,5 @@ void libretroAttachAudioDevice(uint32_t dev);
 /* How far the game's clocks are behind the real ones, in microseconds, for
  * RetroArch's pauses (libretroFrame) */
 int64_t libretroPausedUs(void);
-#ifdef _WIN32
-/* For the ELF loader's symbol resolver: the game's alcOpenDevice and
- * alcCreateContext, a loopback device whose sound goes to the core */
-void libretroOpenALSymbols(void (*hook)(const char *name, void *ours, void **original));
-#endif
 
 #endif
