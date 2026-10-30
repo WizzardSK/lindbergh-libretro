@@ -42,6 +42,7 @@
 #include "../../libretro/libretro_shm.h"
 #include "libretroBridge.h"
 #include "../input/sdlInput.h"
+#include "../config/config.h"
 #include "../log/log.h"
 
 extern SDL_Window *g_SdlWindow;
@@ -571,7 +572,9 @@ static void pace(int frames, int freq)
 #define LR_ALC_FORMAT_TYPE_SOFT 0x1991
 #define LR_ALC_STEREO_SOFT 0x1501
 #define LR_ALC_SHORT_SOFT 0x1402
-#define LR_AL_BLOCK 512
+/* small blocks: a game that waits on its OpenAL buffers to be played gets
+ * them back about every 3 ms, not every 11 (Ghost Squad ran at 53.5 fps) */
+#define LR_AL_BLOCK 128
 typedef void *(*AlcOpenDeviceFn)(const char *);
 typedef void *(*AlcCreateContextFn)(void *, const int *);
 typedef void (*AlcRenderSamplesFn)(void *, void *, int);
@@ -654,11 +657,20 @@ static void *alSymbol(const char *name)
 #endif
 }
 
+/* The games whose sound plays through OpenAL alone: the others that open an
+ * OpenAL device keep it as it was, OutRun 2 SP lost its sound and Virtua
+ * Tennis 3 did not start with a loopback device (NNshi) */
+extern uint32_t gId;
+static bool alLoopbackGame(void)
+{
+    return gId == TOO_SPICY_SBMV || gId == TOO_SPICY_SBMV_TEST || gId == GHOST_SQUAD_EVOLUTION_SBNJ;
+}
+
 static void *hookedAlcOpenDevice(const char *name)
 {
     if (!realAlcOpenDevice)
         return NULL;
-    if (!libretroMode() || alDevice)
+    if (!libretroMode() || alDevice || !alLoopbackGame())
         return realAlcOpenDevice(name);
     AlcOpenDeviceFn loopbackOpen = (AlcOpenDeviceFn)alSymbol("alcLoopbackOpenDeviceSOFT");
     alRenderSamples = (AlcRenderSamplesFn)alSymbol("alcRenderSamplesSOFT");
