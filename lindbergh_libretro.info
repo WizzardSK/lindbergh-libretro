@@ -1,6 +1,6 @@
 display_name = "Sega - Lindbergh (Lindbergh)"
 authors = "Linux Loader Development Team"
-supported_extensions = "elf|lindbergh"
+supported_extensions = "elf|lindbergh|exe|/"
 corename = "Lindbergh"
 categories = "Emulator"
 manufacturer = "Sega"
