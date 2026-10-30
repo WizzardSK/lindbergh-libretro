@@ -54,6 +54,9 @@ static LrShm *shm;
 /* The shared memory as the audio callback sees it, on RetroArch's audio
  * thread: taken away (audio_release_shm) before it is unmapped */
 static LrShm *audio_shm;
+/* the loader's pad_labels_seq the controls list was last sent for; 0 with
+ * each new loader, whose labels are sent again (publish_descriptors) */
+static uint32_t desc_seq;
 static int audio_busy;
 /* Whether RetroArch calls the audio callback (SET_AUDIO_CALLBACK) */
 static bool audio_async;
@@ -555,6 +558,7 @@ static void audio_set_state(bool enabled);
 static void close_shm(void)
 {
     audio_release_shm();
+    desc_seq = 0;
 #ifdef _WIN32
     if (shm)
         UnmapViewOfFile(shm);
@@ -1380,25 +1384,139 @@ static void draw_crosshairs(uint32_t *pixels, unsigned w, unsigned h)
         }
 }
 
+/* RetroPad buttons as the loader's SDL gamepad has them */
+static const struct { unsigned retro, lr; } pad_map[] = {
+    {RETRO_DEVICE_ID_JOYPAD_B, LR_PAD_A}, {RETRO_DEVICE_ID_JOYPAD_A, LR_PAD_B},
+    {RETRO_DEVICE_ID_JOYPAD_Y, LR_PAD_X}, {RETRO_DEVICE_ID_JOYPAD_X, LR_PAD_Y},
+    {RETRO_DEVICE_ID_JOYPAD_SELECT, LR_PAD_BACK}, {RETRO_DEVICE_ID_JOYPAD_START, LR_PAD_START},
+    {RETRO_DEVICE_ID_JOYPAD_L3, LR_PAD_LSTICK}, {RETRO_DEVICE_ID_JOYPAD_R3, LR_PAD_RSTICK},
+    {RETRO_DEVICE_ID_JOYPAD_L, LR_PAD_LSHOULDER}, {RETRO_DEVICE_ID_JOYPAD_R, LR_PAD_RSHOULDER},
+    {RETRO_DEVICE_ID_JOYPAD_UP, LR_PAD_UP}, {RETRO_DEVICE_ID_JOYPAD_DOWN, LR_PAD_DOWN},
+    {RETRO_DEVICE_ID_JOYPAD_LEFT, LR_PAD_LEFT}, {RETRO_DEVICE_ID_JOYPAD_RIGHT, LR_PAD_RIGHT},
+};
+
+/* RetroArch's controls list (input descriptors): what each button and stick
+ * does in the game, by the loader's bindings (pad_labels), and the gun
+ * games' sticks and buttons with Gun Aim on Analog Stick, which the core
+ * reads itself (stick_buttons). Names only: the buttons stay as they were,
+ * and RetroArch's remapping, which comes before the core reads the pads,
+ * rebinds them (NNshi). Sent again when the labels, Gun Aim or Service and
+ * Test Buttons change. */
+#define DESC_MAX (LR_PAD_LABELS + 2 * 12 + 2)
+static struct retro_input_descriptor descs[DESC_MAX];
+static char desc_names[DESC_MAX][32];
+static unsigned desc_count;
+static uint32_t desc_gun_game;
+static bool desc_gun_stick, desc_test_buttons;
+
+static void add_desc(unsigned port, unsigned device, unsigned index, unsigned id, const char *name)
+{
+    if (desc_count >= DESC_MAX - 1)
+        return;
+    for (unsigned i = 0; i < desc_count; i++)
+        if (descs[i].port == port && descs[i].device == device && descs[i].index == index && descs[i].id == id)
+            return;
+    snprintf(desc_names[desc_count], sizeof(desc_names[0]), "%s", name);
+    descs[desc_count] = (struct retro_input_descriptor){port, device, index, id, desc_names[desc_count]};
+    desc_count++;
+}
+
+static void publish_descriptors(void)
+{
+    const uint32_t seq = __atomic_load_n(&shm->pad_labels_seq, __ATOMIC_ACQUIRE);
+    if (!seq || (seq == desc_seq && shm->gun_game == desc_gun_game &&
+                 gun_stick == desc_gun_stick && test_buttons == desc_test_buttons))
+        return;
+    desc_seq = seq;
+    desc_gun_game = shm->gun_game;
+    desc_gun_stick = gun_stick;
+    desc_test_buttons = test_buttons;
+    desc_count = 0;
+
+    if (desc_gun_game && gun_stick)
+        for (unsigned p = 0; p < LR_PLAYERS; p++)
+        {
+            add_desc(p, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, "Aim Left/Right");
+            add_desc(p, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, "Aim Up/Down");
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "Aim Up");
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "Aim Down");
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "Aim Left");
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Aim Right");
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2, "Trigger");
+            switch (desc_gun_game)
+            {
+                case LR_GUNS_TOO_SPICY:
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Reload");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "Left Pedal");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Right Pedal");
+                    break;
+                case LR_GUNS_GHOST_SQUAD:
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Reload");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Action");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "Change");
+                    break;
+                case LR_GUNS_PRIMEVAL_HUNT:
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Reload");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Pump");
+                    break;
+                case LR_GUNS_HOTD4:
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Reload");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Gun Button");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "Shake");
+                    break;
+                default:
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Reload");
+                    add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "Gun Button");
+                    break;
+            }
+        }
+
+    const uint32_t n = shm->pad_label_count < LR_PAD_LABELS ? shm->pad_label_count : LR_PAD_LABELS;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        const LrPadLabel *l = &shm->pad_labels[i];
+        char name[sizeof(l->name) + 1];
+        memcpy(name, l->name, sizeof(l->name));
+        name[sizeof(l->name)] = 0;
+        if (l->pad >= LR_PLAYERS)
+            continue;
+        if (!l->axis)
+        {
+            /* L3 and R3 are Service and Test, which the option can turn off */
+            if (!test_buttons && (l->which == LR_PAD_LSTICK || l->which == LR_PAD_RSTICK))
+                continue;
+            for (unsigned m = 0; m < sizeof(pad_map) / sizeof(pad_map[0]); m++)
+                if (pad_map[m].lr == l->which)
+                    add_desc(l->pad, RETRO_DEVICE_JOYPAD, 0, pad_map[m].retro, name);
+        }
+        else if (l->which == LR_AXIS_LT || l->which == LR_AXIS_RT)
+            add_desc(l->pad, RETRO_DEVICE_JOYPAD, 0,
+                     l->which == LR_AXIS_LT ? RETRO_DEVICE_ID_JOYPAD_L2 : RETRO_DEVICE_ID_JOYPAD_R2, name);
+        else if (l->which < LR_AXIS_LT)
+            add_desc(l->pad, RETRO_DEVICE_ANALOG,
+                     l->which <= LR_AXIS_LY ? RETRO_DEVICE_INDEX_ANALOG_LEFT : RETRO_DEVICE_INDEX_ANALOG_RIGHT,
+                     (l->which == LR_AXIS_LX || l->which == LR_AXIS_RX) ? RETRO_DEVICE_ID_ANALOG_X : RETRO_DEVICE_ID_ANALOG_Y,
+                     name);
+    }
+    /* Test from either pad's R3 (test_pressed) */
+    if (test_buttons)
+        for (unsigned p = 0; p < LR_PLAYERS; p++)
+            add_desc(p, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3, "Test");
+
+    descs[desc_count] = (struct retro_input_descriptor){0};
+    environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, descs);
+}
+
 static void write_input(void)
 {
-    static const struct { unsigned retro, lr; } map[] = {
-        {RETRO_DEVICE_ID_JOYPAD_B, LR_PAD_A}, {RETRO_DEVICE_ID_JOYPAD_A, LR_PAD_B},
-        {RETRO_DEVICE_ID_JOYPAD_Y, LR_PAD_X}, {RETRO_DEVICE_ID_JOYPAD_X, LR_PAD_Y},
-        {RETRO_DEVICE_ID_JOYPAD_SELECT, LR_PAD_BACK}, {RETRO_DEVICE_ID_JOYPAD_START, LR_PAD_START},
-        {RETRO_DEVICE_ID_JOYPAD_L3, LR_PAD_LSTICK}, {RETRO_DEVICE_ID_JOYPAD_R3, LR_PAD_RSTICK},
-        {RETRO_DEVICE_ID_JOYPAD_L, LR_PAD_LSHOULDER}, {RETRO_DEVICE_ID_JOYPAD_R, LR_PAD_RSHOULDER},
-        {RETRO_DEVICE_ID_JOYPAD_UP, LR_PAD_UP}, {RETRO_DEVICE_ID_JOYPAD_DOWN, LR_PAD_DOWN},
-        {RETRO_DEVICE_ID_JOYPAD_LEFT, LR_PAD_LEFT}, {RETRO_DEVICE_ID_JOYPAD_RIGHT, LR_PAD_RIGHT},
-    };
     input_poll_cb();
     bool test_still_held = false;
     for (unsigned p = 0; p < LR_PLAYERS; p++)
     {
         uint32_t buttons = 0;
-        for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
-            if (input_state_cb(p, RETRO_DEVICE_JOYPAD, 0, map[i].retro))
-                buttons |= 1u << map[i].lr;
+        for (unsigned i = 0; i < sizeof(pad_map) / sizeof(pad_map[0]); i++)
+            if (input_state_cb(p, RETRO_DEVICE_JOYPAD, 0, pad_map[i].retro))
+                buttons |= 1u << pad_map[i].lr;
         if (!test_buttons)
             buttons &= ~((1u << LR_PAD_LSTICK) | (1u << LR_PAD_RSTICK));
         if (test_pad_held && (buttons & (1u << LR_PAD_RSTICK)))
@@ -1613,6 +1731,7 @@ void retro_run(void)
         return;
     }
     write_input();
+    publish_descriptors();
     shm->run_seq++;
     lrWake(run_event, &shm->run_seq);
 

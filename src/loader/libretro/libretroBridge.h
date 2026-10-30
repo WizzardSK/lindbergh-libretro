@@ -11,6 +11,9 @@ bool libretroMode();
 /* Virtual SDL gamepads for the core's pads; after SDL is initialized and
  * before initSdlInput, which opens the controllers it finds then */
 void libretroAttachPads();
+/* What the core's pads' buttons and axes do by the game's bindings, for
+ * RetroArch's controls list; after initSdlInput */
+void libretroPublishPadLabels();
 /* The core's input as SDL gamepad, mouse and key state; in pollEvents */
 void libretroPollInput();
 /* At the game's buffer swap: the frame to the core, then its next run */

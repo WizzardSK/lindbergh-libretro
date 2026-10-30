@@ -489,6 +489,32 @@ void libretroFrame()
         _exit(0);
 }
 
+void libretroPublishPadLabels()
+{
+    if (!libretroMode() || !shm)
+        return;
+    uint32_t n = 0;
+    for (int p = 0; p < LR_PLAYERS; p++)
+    {
+        /* the guide button has no RetroPad button */
+        for (int b = 0; b < LR_PAD_GUIDE && n < LR_PAD_LABELS; b++)
+        {
+            LrPadLabel l = {(uint8_t)p, 0, (uint8_t)b, 0, {0}};
+            if (sdlInputPadLabel(p, false, padButton[b], l.name, sizeof(l.name)))
+                shm->pad_labels[n++] = l;
+        }
+        /* LR_AXIS_* are SDL's gamepad axes, in its order */
+        for (int a = 0; a < LR_AXES && n < LR_PAD_LABELS; a++)
+        {
+            LrPadLabel l = {(uint8_t)p, 1, (uint8_t)a, 0, {0}};
+            if (sdlInputPadLabel(p, true, a, l.name, sizeof(l.name)))
+                shm->pad_labels[n++] = l;
+        }
+    }
+    shm->pad_label_count = n;
+    __atomic_store_n(&shm->pad_labels_seq, shm->pad_labels_seq + 1, __ATOMIC_RELEASE);
+}
+
 void libretroRumble(float left, float right, int duration_ms)
 {
     if (!shm)

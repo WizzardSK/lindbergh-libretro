@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 #define LR_SHM_MAGIC 0x4C424C52u /* "RLBL" */
-#define LR_SHM_VERSION 5
+#define LR_SHM_VERSION 6
 
 #define LR_MAX_WIDTH 5120
 #define LR_MAX_HEIGHT 2880
@@ -71,6 +71,18 @@ enum {
 /* The gun games' layouts, which say what the core's buttons are */
 enum { LR_GUNS_NONE, LR_GUNS_STANDARD, LR_GUNS_TOO_SPICY, LR_GUNS_GHOST_SQUAD, LR_GUNS_PRIMEVAL_HUNT, LR_GUNS_HOTD4 };
 
+/* What one of a pad's buttons (LR_PAD_*) or axes (LR_AXIS_*) does in the
+ * game, by the loader's bindings: the core's input descriptors */
+typedef struct LrPadLabel {
+    uint8_t pad;                 /* 0 or 1, RetroArch's port */
+    uint8_t axis;                /* which is an LR_AXIS_*, else an LR_PAD_* */
+    uint8_t which;
+    uint8_t unused;
+    char name[28];
+} LrPadLabel;
+
+#define LR_PAD_LABELS 64
+
 typedef struct LrKey {
     uint32_t scancode;           /* SDL_Scancode */
     uint32_t down;
@@ -109,6 +121,11 @@ typedef struct LrShm {
      * and weak (right) 0..65535 for duration_ms, one more rumble_seq each */
     uint32_t rumble_strong, rumble_weak, rumble_ms;
     volatile uint32_t rumble_seq;
+    /* the pads' buttons and axes the game's bindings use, one more
+     * pad_labels_seq once they are written */
+    uint32_t pad_label_count;
+    volatile uint32_t pad_labels_seq;
+    LrPadLabel pad_labels[LR_PAD_LABELS];
     int16_t audio[LR_AUDIO_FRAMES * 2];
     uint32_t pixels[LR_MAX_WIDTH * LR_MAX_HEIGHT]; /* XRGB8888, top row first */
 } LrShm;

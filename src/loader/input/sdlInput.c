@@ -1518,6 +1518,87 @@ void addActionToDirtyList(JVSPlayer player, LogicalAction action)
 /* Whether the game aims with guns, the libretro core's players aiming it
  * (libretroBridge.c), and its layout (LR_GUNS_*), which says what the core's
  * gun buttons are */
+// An action as RetroArch's controls list it
+static void padActionName(LogicalAction action, char *out, size_t size)
+{
+    static const struct
+    {
+        LogicalAction action;
+        const char *name;
+    } names[] = {
+        {LA_GearUp, "Gear Up"},          {LA_GearDown, "Gear Down"},     {LA_ViewChange, "View Change"},
+        {LA_MusicChange, "Music Change"}, {LA_BoostRight, "Boost Right"}, {LA_GunButton, "Gun Button"},
+        {LA_ActionButton, "Action"},     {LA_ChangeButton, "Change"},    {LA_PedalLeft, "Left Pedal"},
+        {LA_PedalRight, "Right Pedal"},  {LA_OutOfScreen, "Off Screen"}, {LA_Steer, "Steering"},
+        {LA_Steer_Left, "Steer Left"},   {LA_Steer_Right, "Steer Right"}, {LA_Gas_Digital, "Gas"},
+        {LA_Brake_Digital, "Brake"},     {LA_Flying_X, "Stick Left/Right"}, {LA_Flying_Left, "Stick Left"},
+        {LA_Flying_Right, "Stick Right"}, {LA_Flying_Y, "Stick Up/Down"}, {LA_Flying_Up, "Stick Up"},
+        {LA_Flying_Down, "Stick Down"},  {LA_Throttle_Accelerate, "Throttle Up"},
+        {LA_Throttle_Slowdown, "Throttle Down"}, {LA_GunTrigger, "Gun"}, {LA_MissileTrigger, "Missile"},
+        {LA_ClimaxSwitch, "Climax"},     {LA_CardInsert, "Card"},        {LA_Card1Insert, "Card"},
+        {LA_Card2Insert, "Card"},
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (names[i].action == action)
+        {
+            snprintf(out, size, "%s", names[i].name);
+            return;
+        }
+    if (action >= LA_Button1 && action <= LA_Button10)
+    {
+        snprintf(out, size, "Button %d", action - LA_Button1 + 1);
+        return;
+    }
+    if (action >= LA_A && action <= LA_N)
+    {
+        snprintf(out, size, "%c", 'A' + (action - LA_A));
+        return;
+    }
+    for (int i = 0; i < NUM_ACTION_NAMES; i++)
+        if (gActionNameMap[i].action == action)
+        {
+            snprintf(out, size, "%s", gActionNameMap[i].name);
+            return;
+        }
+    snprintf(out, size, "?");
+}
+
+bool sdlInputPadLabel(int pad, bool axis, int sdlId, char *out, size_t size)
+{
+    if (pad < 0 || pad >= MAX_JOYSTICKS || sdlId < 0 ||
+        sdlId >= (axis ? SDL_GAMEPAD_AXIS_COUNT : SDL_GAMEPAD_BUTTON_COUNT))
+        return false;
+    const BindingPair *pair = axis ? &gControllerAxisBindings[pad][sdlId] : &gControllerButtonBindings[pad][sdlId];
+    // an axis split in two (Left and Right on a stick) its negative half first
+    int order[2] = {0, 1};
+    if (pair->bindings[0].axisThreshold > 0 && pair->bindings[1].axisThreshold < 0)
+        order[0] = 1, order[1] = 0;
+    char names[2][32];
+    int count = 0;
+    for (int i = 0; i < 2; i++)
+    {
+        const ControlBinding *b = &pair->bindings[order[i]];
+        if (b->type == INPUT_TYPE_NONE || b->action == LA_ExitGame || b->action == LA_INVALID)
+            continue;
+        padActionName(b->action, names[count], sizeof(names[count]));
+        // the flying games' throttle on both triggers, up on one, down on the other
+        if (b->action == LA_Throttle && b->axisMode == AXIS_MODE_POSITIVE_HALF)
+            snprintf(names[count], sizeof(names[count]), "Throttle Up");
+        else if (b->action == LA_Throttle && b->axisMode == AXIS_MODE_NEGATIVE_HALF)
+            snprintf(names[count], sizeof(names[count]), "Throttle Down");
+        if (count == 1 && strcmp(names[0], names[1]) == 0)
+            continue;
+        count++;
+    }
+    if (count == 0)
+        return false;
+    if (count == 1)
+        snprintf(out, size, "%s", names[0]);
+    else
+        snprintf(out, size, "%s / %s", names[0], names[1]);
+    return true;
+}
+
 int sdlInputGunGame(void)
 {
     if (gameType != SHOOTING)

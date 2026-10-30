@@ -243,6 +243,9 @@ bool needsPlayer(LogicalAction action, const char *name);
 int listSdlControllers(void);
 void addActionToDirtyList(JVSPlayer player, LogicalAction action);
 int sdlInputGunGame(void);
+// For the libretro core: what pad's (0 or 1) gamepad button or axis (axis
+// true) sdlId does by the bindings, into out; false where it is unbound
+bool sdlInputPadLabel(int pad, bool axis, int sdlId, char *out, size_t size);
 void sdlInputSetGun(JVSPlayer player, float x, float y, uint32_t buttons);
 bool sdlInputPhTouch(float mX, float mY, bool down);
 

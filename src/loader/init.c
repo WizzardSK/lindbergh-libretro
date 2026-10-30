@@ -193,6 +193,8 @@ void initMain(char *configPath, char *controlsPath)
     if (initSdlInput(controlsPath) != 0)
         exit(1);
     log_info("SDL input initialized");
+    // what the core's pads do, by the bindings, for RetroArch's controls list
+    libretroPublishPadLabels();
 
 #if defined(__linux__)
     if (initEvdevControllers(&controllers) != 0)
