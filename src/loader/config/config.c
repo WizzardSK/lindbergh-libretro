@@ -141,6 +141,7 @@ void setDefaultValues(EmulatorConfig *cfg)
     cfg->boostRenderRes = 1;
     cfg->region = EX;
     cfg->freeplay = -1;
+    cfg->aburnerMotionOff = 0;
     cfg->showDebugMessages = 0;
     cfg->useAltJvsPassthrough = 0;
     cfg->hummerFlickerFix = 0;
@@ -356,6 +357,7 @@ void applyIniConfig(EmulatorConfig *config, const IniConfig *ini)
             config->region = EX;
     }
     config->freeplay = getInt(ini, "Emulation", "FREEPLAY", config->freeplay);
+    config->aburnerMotionOff = getInt(ini, "Emulation", "ABURNER_MOTION_OFF", config->aburnerMotionOff);
     config->emulateJVS = getInt(ini, "Emulation", "EMULATE_JVS", config->emulateJVS);
     config->emulateRideboard = getInt(ini, "Emulation", "EMULATE_RIDEBOARD", config->emulateRideboard);
     config->emulateDriveboard = getInt(ini, "Emulation", "EMULATE_DRIVEBOARD", config->emulateDriveboard);

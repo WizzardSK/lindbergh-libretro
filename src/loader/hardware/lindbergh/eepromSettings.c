@@ -244,6 +244,57 @@ int setIP(FILE *eeprom, char *ipAddress, char *netMask)
     return 0;
 }
 
+/* CRC32 without the final inversion, as genCrc */
+static uint32_t blockCrc(const uint8_t *data, size_t n)
+{
+    uint32_t crc = 0xffffffffu;
+    while (n--)
+        crc = crc32Table[*data++ ^ (crc & 0xff)] ^ (crc >> 8);
+    return crc;
+}
+
+/* After Burner Climax's motion off, as its test menu sets it (NNshi's
+ * EEPROMs of DVP-0009, 0009A and 0031 with motion on and off): the game's
+ * block at 0x1000, kept twice (0x1080), holds the setting in 0x102B-0x102D,
+ * under the CRC32s at 0x1020 (of 0x1024-0x1047), 0x101C (of 0x1020-0x1047)
+ * and 0x1000 (of the rest of the block). A block not there yet - the game
+ * writes it at its first start - or failing its CRC is left alone. */
+int setAburnerMotionOff(FILE *eeprom)
+{
+    static const uint8_t motion_off[3] = {0x02, 0x01, 0x00};
+    uint8_t block[0x80];
+    fseek(eeprom, 0, SEEK_END);
+    if (ftell(eeprom) < 0x1100)
+        return 0;
+    fseek(eeprom, 0x1000, SEEK_SET);
+    if (fread(block, 1, sizeof(block), eeprom) != sizeof(block))
+        return 0;
+    uint32_t crc;
+    memcpy(&crc, block, 4);
+    if (memcmp(block + 0x0c, "ABCX", 4) != 0 || crc != blockCrc(block + 4, sizeof(block) - 4))
+        return 0;
+    if (memcmp(block + 0x2b, motion_off, 3) == 0)
+        return 0;
+    memcpy(block + 0x2b, motion_off, 3);
+    crc = blockCrc(block + 0x24, 0x24);
+    memcpy(block + 0x20, &crc, 4);
+    crc = blockCrc(block + 0x20, 0x28);
+    memcpy(block + 0x1c, &crc, 4);
+    crc = blockCrc(block + 4, sizeof(block) - 4);
+    memcpy(block, &crc, 4);
+    for (long at = 0x1000; at <= 0x1080; at += 0x80)
+    {
+        if (fseek(eeprom, at, SEEK_SET) != 0 || fwrite(block, 1, sizeof(block), eeprom) != sizeof(block))
+        {
+            printf("Error writing to eeprom.");
+            return 1;
+        }
+    }
+    fflush(eeprom);
+    printf("After Burner Climax: motion set to off in the EEPROM (ABURNER_MOTION_OFF).\n");
+    return 0;
+}
+
 VF5CabinetMode getVF5CabinetMode(FILE *eeprom)
 {
     VF5CabinetMode mode = getConfig()->vf5CabinetMode;

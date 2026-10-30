@@ -73,10 +73,79 @@ extern bool eloResponseReady;
 
 bool sprFontXstLoaded = false;
 
+/* Folders the dumps name otherwise than the loader's layout (NNshi): The
+ * House of the Dead 4's hod4data is the loader's fs, After Burner Climax's
+ * disk0 its disk1. A path that is not there is looked for in the dump's
+ * own folder instead, so neither dump has to be renamed or moved. */
+const char *dumpPath(const char *path)
+{
+    static __thread char alt[1024];
+    const char *from, *to;
+    if (gGrp == GROUP_HOD4 || gGrp == GROUP_HOD4_TEST || gGrp == GROUP_HOD4_SP || gGrp == GROUP_HOD4_SP_TEST)
+    {
+        from = "fs";
+        to = "hod4data";
+    }
+    else if (gGrp == GROUP_ABC)
+    {
+        from = "disk1";
+        to = "disk0";
+    }
+    else
+        return path;
+    if (!path)
+        return path;
+    const size_t len = strlen(from);
+    /* the folder as a whole component of the path */
+    const char *at = NULL;
+    for (const char *p = strstr(path, from); p; p = strstr(p + 1, from))
+    {
+        const bool starts = p == path || p[-1] == '/' || p[-1] == '\\';
+        const bool ends = p[len] == '/' || p[len] == '\\' || p[len] == '\0';
+        if (starts && ends)
+        {
+            at = p;
+            break;
+        }
+    }
+    if (access(path, F_OK) == 0)
+        return path;
+    /* After Burner Climax opens its rom and shader folders from the folder
+     * above its program; the dumps hold them on disk1 and the program on
+     * disk0, where the loader's layout has all four on disk1. A relative
+     * path missing there is looked for on disk1 beside it. */
+    if (gGrp == GROUP_ABC && path[0] != '/')
+    {
+        const char *rel = strncmp(path, "./", 2) == 0 ? path + 2 : path;
+        if ((size_t)snprintf(alt, sizeof(alt), "../disk1/%s", rel) < sizeof(alt) && access(alt, F_OK) == 0)
+        {
+            log_debug("%s found as %s", path, alt);
+            return alt;
+        }
+    }
+    /* what the game misses, also outside the folder, so a dump laid out
+     * otherwise still shows where it is looked for */
+    if (!at)
+    {
+        if (path[0] != '/' || strncmp(path, "/home/", 6) == 0)
+            log_warn("%s not found", path);
+        return path;
+    }
+    if ((size_t)snprintf(alt, sizeof(alt), "%.*s%s%s", (int)(at - path), path, to, at + len) >= sizeof(alt) ||
+        access(alt, F_OK) != 0)
+    {
+        log_warn("%s not found, nor %s", path, alt);
+        return path;
+    }
+    log_debug("%s found as %s", path, alt);
+    return alt;
+}
+
 void ConvertPath(char *dst, const char *src, size_t size)
 {
     if (!src || !dst)
         return;
+    src = dumpPath(src);
     strncpy(dst, src, size - 1);
     dst[size - 1] = '\0';
 
@@ -195,6 +264,7 @@ static int translateOpenMode(int mode)
 
 int sharedOpen(const char *pathname, int flags, ...)
 {
+    pathname = dumpPath(pathname);
 #ifdef __linux__
     static int (*_open)(const char *pathname, int flags, ...) = NULL;
     if (_open == NULL)
@@ -305,6 +375,7 @@ int sharedOpen64(const char *pathname, int flags, ...)
 static FILE *(*_fopen)(const char *restrict pathname, const char *restrict mode) = NULL;
 FILE *sharedFopen(const char *restrict pathname, const char *restrict mode)
 {
+    pathname = dumpPath(pathname);
     if (_fopen == NULL)
         _fopen = REAL_FUNC(fopen);
 #ifdef _WIN32
@@ -431,7 +502,7 @@ FILE *sharedFopen(const char *restrict pathname, const char *restrict mode)
     {
         memmove(newPathname + 2, newPathname + 11, strlen(newPathname + 11) + 1);
         memcpy(newPathname, "..", 2);
-        pathname = newPathname;
+        pathname = dumpPath(newPathname);
     }
 
     if ((newPathname = (char *)strstr(pathname, "/home/disk1")) != NULL && (gGrp == GROUP_OUTRUN || gGrp == GROUP_OUTRUN_TEST))
@@ -534,6 +605,7 @@ FILE *sharedFopen(const char *restrict pathname, const char *restrict mode)
 static FILE *(*_fopen64)(const char *restrict pathname, const char *restrict mode) = NULL;
 FILE *sharedFopen64(const char *pathname, const char *mode)
 {
+    pathname = dumpPath(pathname);
     if (_fopen64 == NULL)
         _fopen64 = REAL_FUNC(fopen64);
 
@@ -1063,6 +1135,7 @@ DIR *opendir(const char *dirname)
 {
     if (_opendir == NULL)
         _opendir = REAL_FUNC(opendir);
+    dirname = dumpPath(dirname);
     log_debug("Opendir %s\n", dirname);
 
     if (strcmp(dirname, "/tmp/") == 0 && gGrp == GROUP_ID5)
@@ -1111,7 +1184,7 @@ int __xstat64(int ver, const char *path, struct stat64 *stat_buf)
     {
         return ___xstat64(ver, "warning", stat_buf);
     }
-    return ___xstat64(ver, path, stat_buf);
+    return ___xstat64(ver, dumpPath(path), stat_buf);
 }
 
 int open(const char *pathname, int flags, ...)

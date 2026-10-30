@@ -111,6 +111,9 @@ static float steering_inner = 0.25f;
 static int steering_power = 3;
 /* WIDTHxHEIGHT for the loader, or "native" for linuxloader.ini's */
 static char resolution[16] = "native";
+/* Debug > TEST_MODE: the content starts in test mode, as the loader's -t;
+ * not a linuxloader.ini setting, so not among debug_settings (NNshi) */
+static bool start_in_test;
 /* Video > Force 16:9: the loader's KEEP_ASPECT_RATIO off (NNshi) */
 static bool force_widescreen;
 /* The Debug options: linuxloader.ini settings, each "default" to leave the
@@ -147,6 +150,7 @@ static const struct { const char *option, *section, *key; } debug_settings[] = {
     {"lindbergh_debug_gsevo_crosshair_always_on", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_ON"},
     {"lindbergh_debug_gsevo_crosshair_always_off", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_OFF"},
     {"lindbergh_debug_enable_network_patches", "Network", "ENABLE_NETWORK_PATCHES"},
+    {"lindbergh_debug_aburner_motion_off", "Emulation", "ABURNER_MOTION_OFF"},
 };
 static char debug_ini[2048];
 /* RetroArch's rumble, for the drive board's force feedback */
@@ -199,6 +203,7 @@ static void read_options(void)
         update_option_display();
     snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
     force_widescreen = !strcmp(get_option("lindbergh_force_widescreen", "disabled"), "enabled");
+    start_in_test = !strcmp(get_option("lindbergh_debug_test_mode", "0"), "1");
     size_t used = 0;
     debug_ini[0] = 0;
     for (size_t i = 0; i < sizeof(debug_settings) / sizeof(debug_settings[0]); i++)
@@ -286,6 +291,9 @@ static struct retro_core_option_v2_definition option_definitions[] = {
     {"lindbergh_debug_freeplay", "FREEPLAY", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
+    {"lindbergh_debug_test_mode", "TEST_MODE", NULL, NULL, NULL, "debug",
+     {{"0", "Off"}, {"1", "On"}, {NULL, NULL}},
+     "0"},
     {"lindbergh_debug_emulate_driveboard", "EMULATE_DRIVEBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
@@ -373,6 +381,12 @@ static struct retro_core_option_v2_definition option_definitions[] = {
     {"lindbergh_debug_enable_network_patches", "ENABLE_NETWORK_PATCHES", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
+    /* The core's own (eepromSettings.c): After Burner Climax does not start
+     * on a Deluxe cabinet with motion on, which it is out of the box, so on
+     * by default (NNshi) */
+    {"lindbergh_debug_aburner_motion_off", "ABURNER_MOTION_OFF", NULL, NULL, NULL, "debug",
+     {{"0", "Off"}, {"1", "On"}, {NULL, NULL}},
+     "1"},
     {NULL, NULL, NULL, NULL, NULL, NULL, {{NULL, NULL}}, NULL},
 };
 
@@ -1112,7 +1126,7 @@ snprintf(s_elf, sizeof(s_elf), "%s", elf);
     snprintf(s_root, sizeof(s_root), "%s", root);
     if (!test_program(s_elf, s_test_elf, sizeof(s_test_elf)))
         s_test_elf[0] = 0;
-    test_running = false;
+    test_running = start_in_test;
     since_test = UINT_MAX;
     test_pad_held = test_key_held = false;
     return start_loader();

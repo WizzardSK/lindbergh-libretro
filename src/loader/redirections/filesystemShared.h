@@ -40,6 +40,7 @@ extern "C" {
 #endif
 
 void ConvertPath(char *dst, const char *src, size_t size);
+const char *dumpPath(const char *path);
 int sharedRemove(const char *path);
 int sharedMkdir(const char *path, mode_t mode);
 int sharedOpen(const char *pathname, int flags, ...);

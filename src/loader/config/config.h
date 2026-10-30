@@ -290,6 +290,7 @@ typedef struct
     uint32_t crc32;
     GameRegion region;
     int freeplay;
+    int aburnerMotionOff;
     int showDebugMessages;
     int useAltJvsPassthrough;
     char *gameID;

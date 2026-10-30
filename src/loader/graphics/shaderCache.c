@@ -15,6 +15,7 @@
 
 #include "../config/config.h"
 #include "../log/log.h"
+#include "../redirections/filesystemShared.h"
 #include "../mainShared.h"
 
 #include "shaderPatches.h"
@@ -480,6 +481,7 @@ size_t freadReplace(void *buf, size_t size, size_t count, int idx)
 int loadShader(char *path, char *buffer)
 {
     int fd;
+    path = (char *)dumpPath(path);
 #ifdef _WIN32
     if ((fd = open(path, O_RDONLY | O_BINARY)) == -1)
 #else
@@ -499,6 +501,7 @@ int loadShader(char *path, char *buffer)
 
 int xdlt_load_mmfile(char const *path, mmfile_t *mf)
 {
+    path = dumpPath(path);
     int fd;
     int pos = 0;
     long size;

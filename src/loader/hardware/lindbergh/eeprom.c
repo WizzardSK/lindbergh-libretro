@@ -106,6 +106,12 @@ int initEeprom()
     if (gGrp == GROUP_VF5)
         getConfig()->vf5CabinetMode = getVF5CabinetMode(eeprom);
 
+    if (gGrp == GROUP_ABC && getConfig()->aburnerMotionOff == 1 && setAburnerMotionOff(eeprom) != 0)
+    {
+        fclose(eeprom);
+        return 1;
+    }
+
     fseek(eeprom, 0, SEEK_SET);
 
     return 0;

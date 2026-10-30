@@ -6,6 +6,7 @@ int getRegion();
 int getFreeplay();
 int setRegion(FILE *eeprom, int region);
 int setFreeplay(FILE *eeprom, int freeplay);
+int setAburnerMotionOff(FILE *eeprom);
 int fixCreditSection(FILE *eeprom);
 int fixCoinAssignmentsHummer(FILE *eeprom);
 int setIP(FILE *eeprom, char *ipAddress, char *netMask);

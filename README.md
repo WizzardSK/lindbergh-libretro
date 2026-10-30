@@ -16,8 +16,14 @@ Some dumps need their folders moved before the game runs; the log does not say s
 
 | Game | What it takes |
 |---|---|
-| After Burner Climax | The `abc` and `game` folders under `disk1` instead of `disk0`. On a cabinet set to Deluxe, motion off in the test mode. |
-| The House of the Dead 4 | The `hod4data` folder renamed to `fs`. |
+| After Burner Climax | As dumped (`abc` and `game` on `disk0`, `rom` and `shader` on `disk1`), or with all four on `disk1` as the loader has them. Debug > ABURNER_MOTION_OFF (on by default) sets motion off in the EEPROM, without which it does not start on a Deluxe cabinet; it takes effect from the second start, once the game has written its EEPROM. Rev. B (DVP-0009B) does not start. |
+| The House of the Dead 4 | The `hod4data` folder as dumped, or renamed to `fs` as the loader has it. |
+
+### Known quirks
+
+- Virtua Fighter 5 does not scale past 2560x1440: at Resolution 3840x2160 or higher it shows a black screen, as with the loader on its own (NNshi).
+- After Burner Climax shows an error on its first start, while its EEPROM is new: close it and start it again (NNshi).
+- Gun games: with Gun Aim on Analog Stick the pad's L, L2, R and R2 (LB, LT, RB, RT) are the gun's buttons; on Mouse the mouse's left, right and middle buttons are, and shooting off the picture reloads. Which button does what per game is under Gun Aim below.
 
 On Windows with an NVIDIA GPU, a program profile in the NVIDIA Control Panel for `system/lindbergh/linuxloader.exe` with Anisotropic Filtering at 16x sharpens the games' textures; forcing MSAA or MFAA there changes nothing (NNshi).
 
@@ -37,7 +43,7 @@ Grouped into Video, Input, Audio and Debug, each with a tooltip; Steering Inner 
 | Steering Inner Zone | 5 to 50% (25): with logarithmic, the share of the turn at the centre | on the fly |
 | Force Feedback to Rumble | enabled, disabled: the drive board's force feedback as rumble on player 1's pad (OutRun 2 SP SDX; other games only with `EMULATE_DRIVEBOARD = 1`) | on the fly |
 | Steering Effect | cubic (strong), square (weak): with logarithmic, the outer part's curve | on the fly |
-| Debug | every `linuxloader.ini` setting (the core's defaults differ in two: HUMMER_FLICKER_FIX on, PRIMEVAL_HUNT_SCREEN_MODE 1) the core does not otherwise cover (free play, written to the game's EEPROM at start; board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
+| Debug | every `linuxloader.ini` setting (the core's defaults differ in two: HUMMER_FLICKER_FIX on, PRIMEVAL_HUNT_SCREEN_MODE 1) the core does not otherwise cover (free play, written to the game's EEPROM at start; TEST_MODE, the content started in test mode as with the loader's `-t`, not a `linuxloader.ini` setting; board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
 | Audio Thread | enabled, disabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; on by default, though it loses OutRun 2 SP's announcer | at the next start of the content |
 
 ## Controls
