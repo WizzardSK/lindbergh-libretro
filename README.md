@@ -41,7 +41,7 @@ Grouped into Video, Input, Audio and Debug, each with a tooltip; Steering Inner 
 | Crosshair | enabled, disabled: the gun games' crosshairs over the picture, blue for player 1, red for player 2 (shown once that player aims) | on the fly |
 | Steering Response | linear, logarithmic: the left stick's X on a curve with less of the turn around the centre and steeper towards the ends, as the Sega System 32 racers' dip switch has it | on the fly |
 | Steering Inner Zone | 5 to 50% (25): with logarithmic, the share of the turn at the centre | on the fly |
-| Force Feedback to Rumble | enabled, disabled: the drive board's force feedback as rumble on player 1's pad (OutRun 2 SP SDX; other games only with `EMULATE_DRIVEBOARD = 1`) | on the fly |
+| Force Feedback to Rumble | enabled, disabled: the drive board's force feedback as rumble on player 1's pad in the driving games (OutRun 2 SP SDX, Initial D 4 and 5, Hummer), whose drive board the core has emulated (Debug > EMULATE_DRIVEBOARD at Off turns that off) | on the fly |
 | Steering Effect | cubic (strong), square (weak): with logarithmic, the outer part's curve | on the fly |
 | Debug | every `linuxloader.ini` setting (the core's defaults differ in two: HUMMER_FLICKER_FIX on, PRIMEVAL_HUNT_SCREEN_MODE 1) the core does not otherwise cover (free play, written to the game's EEPROM at start; TEST_MODE, the content started in test mode as with the loader's `-t`, not a `linuxloader.ini` setting; board emulation, region, cabinet colour, debug messages, the game-specific and graphics switches, crosshairs, network patches), each Default first, which leaves the game's own or the `linuxloader.ini`'s; one set goes over the file's | at the next start of the content |
 | Audio Thread | enabled, disabled: the sound handed to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames; on by default, though it loses OutRun 2 SP's announcer | at the next start of the content |
@@ -56,7 +56,7 @@ Without a `controls.ini`, the loader's defaults:
 - Guns: both players, by the Gun Aim option (the sticks by default). Every gun game needs its guns calibrated in the test menu (R3) before it plays right. Too Spicy's pedals are on the keyboard's left and right arrows as well.
 - Touch screens: RetroArch's light gun, which follows the mouse, or its pointer while touched; the mouse's buttons click.
 - RetroArch's controls list (Quick Menu > Controls) names each pad's buttons and sticks by what they do in the game: the loader's bindings for its type of game (driving, flying, the fighting and other button games), and the gun games' sticks and buttons with Gun Aim on Analog Stick. The buttons stay as they are; RetroArch's remapping rebinds them, also per game (NNshi).
-- Rumble: the drive board's force feedback, which the loader turns into left and right rumble, reaches player 1's pad (OutRun 2 SP; Initial D runs without the drive board's emulation, `EMULATE_DRIVEBOARD`).
+- Rumble: the drive board's force feedback, which the loader turns into left and right rumble, reaches player 1's pad in every driving game (OutRun 2 SP, Initial D 4 and 5, Hummer): the core has the loader emulate the drive board for them all, where the loader alone does it for OutRun 2 SP only (NNshi).
 
 A `controls.ini` maps them as standalone, since RetroArch's pads reach the game as SDL gamepads; see the [Controls Guide](docs/Controls-Guide.md).
 

@@ -70,6 +70,13 @@ void initMain(char *configPath, char *controlsPath)
         }
     }
 
+    /* For the libretro core, the drive board emulated for every driving
+     * game, not only OutRun 2 SP (the loader's own table): Initial D 4 and 5
+     * and Hummer then send their force feedback, which the core turns into
+     * rumble (NNshi). Debug > EMULATE_DRIVEBOARD at Off still turns it off. */
+    if (getenv("LINDBERGH_LIBRETRO_SHM") && getConfig()->gameType == DRIVING)
+        getConfig()->emulateDriveboard = 1;
+
     /* the libretro core's Debug options, over linuxloader.ini's */
     const char *debugIni = getenv("LINDBERGH_LIBRETRO_INI");
     if (debugIni && *debugIni)
