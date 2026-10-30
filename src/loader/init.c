@@ -60,6 +60,14 @@ void initMain(char *configPath, char *controlsPath)
     {
         getConfig()->width = resolutionW;
         getConfig()->height = resolutionH;
+        /* Virtua Fighter 5 renders nothing above 2880x1620: black at
+         * 3840x2160 and 5120x2880 (NNshi) */
+        if (getConfig()->gameGroup == GROUP_VF5 && (resolutionW > 2880 || resolutionH > 1620))
+        {
+            getConfig()->width = 2880;
+            getConfig()->height = 1620;
+            log_info("libretro: Virtua Fighter 5 at 2880x1620, its highest, in place of %dx%d\n", resolutionW, resolutionH);
+        }
     }
 
     /* the libretro core's Debug options, over linuxloader.ini's */

@@ -904,6 +904,21 @@ static const ControlBinding gLibretroPadBindings[] = {
     {INPUT_TYPE_GAMEPAD_BUTTON, 0, SDL_GAMEPAD_BUTTON_RIGHT_STICK, AXIS_MODE_DIGITAL, 0, false, SYSTEM, LA_Test, -1, 0},
 };
 
+// A default binding, but for the libretro core Virtua Tennis 3's Button 3,
+// which the game does not read, as Button 1 and 2 together: its lob, a
+// button of its own (NNshi)
+static void addDefaultBinding(ControlBinding binding)
+{
+    if (libretroMode() && gGrp == GROUP_VT3 && binding.action == LA_Button3 &&
+        (binding.type == INPUT_TYPE_GAMEPAD_BUTTON || binding.type == INPUT_TYPE_GAMEPAD_AXIS))
+    {
+        binding.action = LA_Button1;
+        addBinding(binding);
+        binding.action = LA_Button2;
+    }
+    addBinding(binding);
+}
+
 void setDefaultMappings()
 {
     log_warn("Applying default mappings...\n");
@@ -955,7 +970,7 @@ void setDefaultMappings()
     {
         for (size_t i = 0; i < bindingsCount; i++)
         {
-            addBinding(game_bindings[i]);
+            addDefaultBinding(game_bindings[i]);
         }
     }
 
@@ -972,7 +987,7 @@ void setDefaultMappings()
             {
                 binding.deviceIndex = 1;
                 binding.player = PLAYER_2;
-                addBinding(binding);
+                addDefaultBinding(binding);
             }
         }
     }
@@ -1536,9 +1551,22 @@ void addActionToDirtyList(JVSPlayer player, LogicalAction action)
 /* Whether the game aims with guns, the libretro core's players aiming it
  * (libretroBridge.c), and its layout (LR_GUNS_*), which says what the core's
  * gun buttons are */
-// An action as RetroArch's controls list it
+// An action as RetroArch's controls list it, the button games' buttons by
+// what they do there (NNshi)
 static void padActionName(LogicalAction action, char *out, size_t size)
 {
+    static const char *const vf5[] = {"Punch", "Kick", "Guard"};
+    static const char *const vt3[] = {"Top Spin", "Slice"};
+    if (gGrp == GROUP_VF5 && action >= LA_Button1 && action <= LA_Button3)
+    {
+        snprintf(out, size, "%s", vf5[action - LA_Button1]);
+        return;
+    }
+    if (gGrp == GROUP_VT3 && action >= LA_Button1 && action <= LA_Button2)
+    {
+        snprintf(out, size, "%s", vt3[action - LA_Button1]);
+        return;
+    }
     static const struct
     {
         LogicalAction action;
@@ -1610,6 +1638,13 @@ bool sdlInputPadLabel(int pad, bool axis, int sdlId, char *out, size_t size)
     }
     if (count == 0)
         return false;
+    // Virtua Tennis 3's lob, Button 1 and 2 on one button (addDefaultBinding)
+    if (gGrp == GROUP_VT3 && count == 2 && pair->bindings[0].action + pair->bindings[1].action == LA_Button1 + LA_Button2 &&
+        (pair->bindings[0].action == LA_Button1 || pair->bindings[0].action == LA_Button2))
+    {
+        snprintf(out, size, "Lob");
+        return true;
+    }
     if (count == 1)
         snprintf(out, size, "%s", names[0]);
     else

@@ -21,7 +21,7 @@ Some dumps need their folders moved before the game runs; the log does not say s
 
 ### Known quirks
 
-- Virtua Fighter 5 does not scale past 2560x1440: at Resolution 3840x2160 or higher it shows a black screen, as with the loader on its own (NNshi).
+- Virtua Fighter 5 renders at most 2880x1620 (above it the loader on its own shows a black screen): at Resolution 3840x2160 or 5120x2880 the core runs it at 2880x1620 (NNshi).
 - After Burner Climax shows an error on its first start, while its EEPROM is new: close it and start it again (NNshi).
 - Gun games: with Gun Aim on Analog Stick the pad's L, L2, R and R2 (LB, LT, RB, RT) are the gun's buttons; on Mouse the mouse's left, right and middle buttons are, and shooting off the picture reloads. Which button does what per game is under Gun Aim below.
 
@@ -50,7 +50,7 @@ Grouped into Video, Input, Audio and Debug, each with a tooltip; Steering Inner 
 
 Without a `controls.ini`, the loader's defaults:
 
-- Pads: RetroArch's ports 1 and 2 are players 1 and 2, port 2 with the same buttons as port 1 in the button games (Virtua Fighter 5, Virtua Tennis 3); Start is start, Select a coin, L3 service and R3 test (unless Service and Test Buttons is off). The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
+- Pads: RetroArch's ports 1 and 2 are players 1 and 2, port 2 with the same buttons as port 1 in the button games (Virtua Fighter 5: Punch, Kick, Guard; Virtua Tennis 3: Top Spin, Slice, and Button 3 as Lob, both together, as the game has no third button); Start is start, Select a coin, L3 service and R3 test (unless Service and Test Buttons is off). The machine's own controllers are left to RetroArch, and RetroArch's analog dead zone applies (the loader adds none of its own; a `controls.ini` can still set one).
 - Keyboard: RetroArch's keyboard is the game's: 5 and 6 coin, 1 and 2 start, T test, S service, the arrows.
 - Test menu: Test (R3 or T) during play opens it, as on a cabinet. A game that quits for it (most do: Rambo, Virtua Fighter 5, After Burner Climax) is started again in test mode, as the loader's `-t` does; a game with a separate test program runs that instead, which the core ends the game for after 5 s if it does not quit: OutRun 2 SP SDX's JenTest (in a JenTest folder beside Jennifer's), Virtua Tennis 3's vt3_testmode, The House of the Dead 4's hod4testM, The House of the Dead EX's hodextestR and Apache's apachetestM (beside the game), with or without `.elf`. A game that keeps running has its test menu in the game (Initial D). Leaving test mode starts the game again, and so does a game that quits by itself after its first 10 s.
 - Guns: both players, by the Gun Aim option (the sticks by default). Every gun game needs its guns calibrated in the test menu (R3) before it plays right. Too Spicy's pedals are on the keyboard's left and right arrows as well.
