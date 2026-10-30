@@ -958,6 +958,24 @@ void setDefaultMappings()
             addBinding(game_bindings[i]);
         }
     }
+
+    // For the libretro core, port 2's pad plays the button games as port 1's
+    // does: the defaults bind only player 1 to a gamepad, so player 2 could
+    // press Start and nothing else (NNshi, Virtua Fighter 5)
+    if (libretroMode() && gameType == DIGITAL)
+    {
+        for (size_t i = 0; i < bindingsCount; i++)
+        {
+            ControlBinding binding = game_bindings[i];
+            if ((binding.type == INPUT_TYPE_GAMEPAD_BUTTON || binding.type == INPUT_TYPE_GAMEPAD_AXIS) &&
+                binding.deviceIndex == 0 && binding.player == PLAYER_1 && binding.action != LA_Card1Insert)
+            {
+                binding.deviceIndex = 1;
+                binding.player = PLAYER_2;
+                addBinding(binding);
+            }
+        }
+    }
 }
 
 /**

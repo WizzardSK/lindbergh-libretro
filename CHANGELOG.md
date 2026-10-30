@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Player 2 plays the button games (Virtua Fighter 5, Virtua Tennis 3) on port 2's pad with the same buttons and directions as player 1; before, only Start worked there (NNshi).
 - RetroArch's controls list names the buttons and sticks by what they do in the game (Gas, Brake, Gear Up, View Change, Missile, Trigger, Reload...), taken from the loader's bindings, and with Gun Aim on Analog Stick from the gun games' layouts; nothing is bound differently, and RetroArch's remapping now has something to rebind (NNshi).
 - The core takes programs without an extension and `.exe` (Primeval Hunt's `game.exe`) as content; with RetroArch's Filter Unknown Extensions off, the file browser offers them (NNshi).
 - New option Debug > ABURNER_MOTION_OFF, last, on by default: After Burner Climax's motion set to off in its EEPROM at start, as its test menu does, without which it does not start on the Deluxe cabinet it is set to out of the box; from the second start, as the game writes its EEPROM at its first. Rev. B (DVP-0009B) does not start, from either layout (NNshi).
