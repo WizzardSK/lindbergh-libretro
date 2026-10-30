@@ -235,7 +235,7 @@ static struct retro_core_option_v2_category option_categories[] = {
 
 static struct retro_core_option_v2_definition option_definitions[] = {
     {"lindbergh_resolution", "Resolution (Restart)", NULL,
-     "The width and height the games the loader can patch render at. Native keeps the linuxloader.ini's. Every frame goes through system memory to RetroArch, so the highest ones cost speed.",
+     "The width and height the games the loader can patch render at. Native keeps the linuxloader.ini's. Every frame goes through system memory to RetroArch, so the highest ones cost speed. Warning: setting this option above your display's resolution will break some games or make them unable to launch.",
      NULL, "video",
      {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
      "native"},
@@ -493,7 +493,23 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 
 void retro_set_controller_port_device(unsigned port, unsigned device) { (void)port; (void)device; }
 
-void retro_reset(void) {}
+static bool start_loader(void);
+static void stop_loader(void);
+
+/* RetroArch's Reset: the game stopped and started again, as at load, the
+ * way a cabinet's power cycle does (NNshi) */
+void retro_reset(void)
+{
+    if (!s_elf[0])
+        return;
+    lr_log(RETRO_LOG_INFO, "reset: the game started again\n");
+    stop_loader();
+    test_running = start_in_test;
+    since_test = UINT_MAX;
+    test_pad_held = test_key_held = false;
+    if (!start_loader())
+        environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
+}
 
 /* A .lindbergh file holds the ELF's path, relative to the file's folder */
 /* The last folder separator of a path, or NULL; Windows has both kinds */

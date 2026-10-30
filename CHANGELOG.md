@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- RetroArch's Reset starts the game again, as at load; it did nothing (NNshi).
+- Resolution's tooltip warns that a resolution above the display's breaks some games or keeps them from starting (NNshi).
 - Virtua Fighter 5 at Resolution 3840x2160 or 5120x2880 runs at 2880x1620, the most it renders, instead of a black screen (NNshi).
 - Virtua Tennis 3: Button 3, which the game does not read, is Lob (Button 1 and 2 together). RetroArch's controls list names the button games' buttons: Punch, Kick, Guard in Virtua Fighter 5, Top Spin, Slice, Lob in Virtua Tennis 3 (NNshi).
 - Player 2 plays the button games (Virtua Fighter 5, Virtua Tennis 3) on port 2's pad with the same buttons and directions as player 1; before, only Start worked there (NNshi).
