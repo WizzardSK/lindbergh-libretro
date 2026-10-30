@@ -657,17 +657,22 @@ static void *alSymbol(const char *name)
 #endif
 }
 
-/* The games whose sound plays through OpenAL alone: the others that open an
- * OpenAL device keep it as it was, OutRun 2 SP lost its sound and Virtua
- * Tennis 3 did not start with a loopback device (NNshi) */
+/* The games whose OpenAL sound otherwise plays past the core: the others
+ * keep their device as it was. Ghost Squad Evolution ran at 53.5 fps with a
+ * loopback device, so it keeps its own until that is understood (NNshi). */
 extern uint32_t gId;
 static bool alLoopbackGame(void)
 {
-    return gId == TOO_SPICY_SBMV || gId == TOO_SPICY_SBMV_TEST || gId == GHOST_SQUAD_EVOLUTION_SBNJ;
+    return gId == TOO_SPICY_SBMV || gId == TOO_SPICY_SBMV_TEST;
 }
 
 static void *hookedAlcOpenDevice(const char *name)
 {
+    /* the resolver clears the original when it registers the hook and fills
+     * it in only if openal32.dll is loaded by then: else from the DLL now,
+     * or every OpenAL game got no device and played nothing (NNshi) */
+    if (!realAlcOpenDevice)
+        realAlcOpenDevice = (AlcOpenDeviceFn)alSymbol("alcOpenDevice");
     if (!realAlcOpenDevice)
         return NULL;
     if (!libretroMode() || alDevice || !alLoopbackGame())
@@ -687,6 +692,8 @@ static void *hookedAlcOpenDevice(const char *name)
 
 static void *hookedAlcCreateContext(void *device, const int *attrs)
 {
+    if (!realAlcCreateContext)
+        realAlcCreateContext = (AlcCreateContextFn)alSymbol("alcCreateContext");
     if (!realAlcCreateContext)
         return NULL;
     if (!device || device != alDevice)
