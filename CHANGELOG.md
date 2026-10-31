@@ -4,7 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
-- Debug > EMULATE_DRIVEBOARD is On by default, not Default (per game), which is still there: the drive board is emulated for every game, so Initial D 4 and 5 and Hummer rumble too, not only OutRun 2 SP (NNshi).
+- Debug > EMULATE_DRIVEBOARD's Default (per game) emulates the drive board for Initial D 4 and 5 and Hummer too, not only OutRun 2 SP, so they rumble as well (NNshi).
 - RetroArch's Reset starts the game again, as at load; it did nothing (NNshi).
 - Resolution's tooltip warns that a resolution above the display's breaks some games or keeps them from starting (NNshi).
 - Virtua Fighter 5 at Resolution 3840x2160 or 5120x2880 runs at 2880x1620, the most it renders, instead of a black screen (NNshi).

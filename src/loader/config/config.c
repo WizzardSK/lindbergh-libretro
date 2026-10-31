@@ -49,6 +49,15 @@ static int detectGame(uint32_t elf_crc)
         config.gameGroup = gameData->gameGroup;
         config.emulateRideboard = gameData->emulateRideboard;
         config.emulateDriveboard = gameData->emulateDriveboard;
+        // For the libretro core: the drive board also for Initial D 4 and 5
+        // and Hummer, so their force feedback reaches the pad as rumble; the
+        // game list has it for OutRun 2 SP only. Games that do not drive it
+        // (VT3, VF5) do not start with it (NNshi)
+        const char *libretroShmGame = getenv("LINDBERGH_LIBRETRO_SHM");
+        if (libretroShmGame && *libretroShmGame &&
+            (config.gameGroup == GROUP_ID4_EXP || config.gameGroup == GROUP_ID4_JAP || config.gameGroup == GROUP_ID5 ||
+             config.gameGroup == GROUP_HUMMER))
+            config.emulateDriveboard = 1;
         config.emulateMotionboard = gameData->emulateMotionboard;
         config.emulateHW210CardReader = gameData->emulateHW210CardReader;
         config.emulateIDCardReader = gameData->emulateIDCardReader;
