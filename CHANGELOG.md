@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- The core is linuxloader, after the project it is built on, which is to run other arcade systems than Lindbergh too: `linuxloader_libretro.so` / `.dll` and `.info`, shown as Sega - Lindbergh (linuxloader). It reports its version as the loader's release and this fork's commit, as `v3.0.13 (libretro core 911049d)`, and logs it at load. The loader now goes to `system/linuxloader/`, and RetroArch keeps the core's saves and options under linuxloader: move `saves/Lindbergh/` (the games' EEPROM and SRAM) to `saves/linuxloader/`, and `system/lindbergh/` can be deleted (NNshi).
 - Debug > EMULATE_DRIVEBOARD's Default (per game) emulates the drive board for Initial D 4 and 5 and Hummer too, not only OutRun 2 SP, so they rumble as well (NNshi).
 - RetroArch's Reset starts the game again, as at load; it did nothing (NNshi).
 - Resolution's tooltip warns that a resolution above the display's breaks some games or keeps them from starting (NNshi).

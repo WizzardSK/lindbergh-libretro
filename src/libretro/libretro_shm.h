@@ -1,5 +1,5 @@
 /*
- * The memory the libretro core (lindbergh_libretro.so, a process of the
+ * The memory the libretro core (linuxloader_libretro.so, a process of the
  * frontend) and the loader running the game (linuxloader.so, preloaded into
  * the 32-bit game; linuxloader.exe on Windows) share. Its name is in
  * LINDBERGH_LIBRETRO_SHM; the core creates it (shm_open, or a named file

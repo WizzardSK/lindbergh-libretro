@@ -4,7 +4,7 @@
  * handed its input and taking its frames and audio through shared memory
  * (libretro_shm.h, the loader's side in src/loader/libretro/libretroBridge.c).
  *
- * The loader comes from <system>/lindbergh/. On Linux that is the loader's
+ * The loader comes from <system>/linuxloader/. On Linux that is the loader's
  * AppDir, the launcher, linuxloader.so and the 32-bit libraries the games
  * need, run through its AppRun as standalone runs it. On Windows it is
  * linuxloader.exe and its ll-deps/, as in the loader's Windows release.
@@ -95,7 +95,7 @@ static char s_elf[PATH_MAX], s_dir[PATH_MAX], s_root[PATH_MAX];
 /* The game's separate test program (test_program), empty for a game whose
  * test menu is in the game itself */
 static char s_test_elf[PATH_MAX];
-/* RetroArch's saves directory for the core (saves/Lindbergh when sorted by
+/* RetroArch's saves directory for the core (saves/linuxloader when sorted by
  * core), where the loader keeps each game's EEPROM and SRAM by its DVP
  * (init.c); empty without one */
 static char s_saves[PATH_MAX];
@@ -123,37 +123,37 @@ static bool force_widescreen;
  * game's own or the linuxloader.ini's; the ones set go to the loader as
  * "Section/KEY=value" lines (init.c, applyIniLines) (NNshi) */
 static const struct { const char *option, *section, *key; } debug_settings[] = {
-    {"lindbergh_debug_freeplay", "Emulation", "FREEPLAY"},
-    {"lindbergh_debug_emulate_driveboard", "Emulation", "EMULATE_DRIVEBOARD"},
-    {"lindbergh_debug_emulate_motionboard", "Emulation", "EMULATE_MOTIONBOARD"},
-    {"lindbergh_debug_emulate_rideboard", "Emulation", "EMULATE_RIDEBOARD"},
-    {"lindbergh_debug_emulate_hw210_cardreader", "Emulation", "EMULATE_HW210_CARDREADER"},
-    {"lindbergh_debug_emulate_id_cardreader", "Emulation", "EMULATE_ID_CARDREADER"},
-    {"lindbergh_debug_emulate_touchscreen", "Emulation", "EMULATE_TOUCHSCREEN"},
-    {"lindbergh_debug_region", "Emulation", "REGION"},
-    {"lindbergh_debug_lindbergh_colour", "System", "LINDBERGH_COLOUR"},
-    {"lindbergh_debug_debug_msgs", "System", "DEBUG_MSGS"},
-    {"lindbergh_debug_use_alt_jvs_passthrough", "System", "USE_ALT_JVS_PASSTHROUGH"},
-    {"lindbergh_debug_boost_render_res", "Display", "BOOST_RENDER_RES"},
-    {"lindbergh_debug_hummer_flicker_fix", "Graphics", "HUMMER_FLICKER_FIX"},
-    {"lindbergh_debug_lgj_render_with_mesa", "Graphics", "LGJ_RENDER_WITH_MESA"},
-    {"lindbergh_debug_disable_builtin_font", "Graphics", "DISABLE_BUILTIN_FONT"},
-    {"lindbergh_debug_disable_builtin_logos", "Graphics", "DISABLE_BUILTIN_LOGOS"},
-    {"lindbergh_debug_cpu_freq_ghz", "GameSpecific", "CPU_FREQ_GHZ"},
-    {"lindbergh_debug_skip_outrun_cabinet_check", "GameSpecific", "SKIP_OUTRUN_CABINET_CHECK"},
-    {"lindbergh_debug_id_steering_reduction_percentage", "GameSpecific", "ID_STEERING_REDUCTION_PERCENTAGE"},
-    {"lindbergh_debug_id5_chinese_language", "GameSpecific", "ID5_CHINESE_LANGUAGE"},
-    {"lindbergh_debug_harley_analog_remap", "GameSpecific", "HARLEY_ANALOG_REMAP"},
-    {"lindbergh_debug_mj4_enabled_all_the_time", "GameSpecific", "MJ4_ENABLED_ALL_THE_TIME"},
-    {"lindbergh_debug_rambo_guns_switch", "GameSpecific", "RAMBO_GUNS_SWITCH"},
-    {"lindbergh_debug_primeval_hunt_screen_mode", "GameSpecific", "PRIMEVAL_HUNT_SCREEN_MODE"},
-    {"lindbergh_debug_primeval_hunt_test_screen_single", "GameSpecific", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE"},
-    {"lindbergh_debug_id_cardfile_autoload", "Cards", "ID_CARDFILE_AUTOLOAD"},
-    {"lindbergh_debug_enable_crosshairs", "CrossHairs", "ENABLE_CROSSHAIRS"},
-    {"lindbergh_debug_gsevo_crosshair_always_on", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_ON"},
-    {"lindbergh_debug_gsevo_crosshair_always_off", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_OFF"},
-    {"lindbergh_debug_enable_network_patches", "Network", "ENABLE_NETWORK_PATCHES"},
-    {"lindbergh_debug_aburner_motion_off", "Emulation", "ABURNER_MOTION_OFF"},
+    {"linuxloader_debug_freeplay", "Emulation", "FREEPLAY"},
+    {"linuxloader_debug_emulate_driveboard", "Emulation", "EMULATE_DRIVEBOARD"},
+    {"linuxloader_debug_emulate_motionboard", "Emulation", "EMULATE_MOTIONBOARD"},
+    {"linuxloader_debug_emulate_rideboard", "Emulation", "EMULATE_RIDEBOARD"},
+    {"linuxloader_debug_emulate_hw210_cardreader", "Emulation", "EMULATE_HW210_CARDREADER"},
+    {"linuxloader_debug_emulate_id_cardreader", "Emulation", "EMULATE_ID_CARDREADER"},
+    {"linuxloader_debug_emulate_touchscreen", "Emulation", "EMULATE_TOUCHSCREEN"},
+    {"linuxloader_debug_region", "Emulation", "REGION"},
+    {"linuxloader_debug_lindbergh_colour", "System", "LINDBERGH_COLOUR"},
+    {"linuxloader_debug_debug_msgs", "System", "DEBUG_MSGS"},
+    {"linuxloader_debug_use_alt_jvs_passthrough", "System", "USE_ALT_JVS_PASSTHROUGH"},
+    {"linuxloader_debug_boost_render_res", "Display", "BOOST_RENDER_RES"},
+    {"linuxloader_debug_hummer_flicker_fix", "Graphics", "HUMMER_FLICKER_FIX"},
+    {"linuxloader_debug_lgj_render_with_mesa", "Graphics", "LGJ_RENDER_WITH_MESA"},
+    {"linuxloader_debug_disable_builtin_font", "Graphics", "DISABLE_BUILTIN_FONT"},
+    {"linuxloader_debug_disable_builtin_logos", "Graphics", "DISABLE_BUILTIN_LOGOS"},
+    {"linuxloader_debug_cpu_freq_ghz", "GameSpecific", "CPU_FREQ_GHZ"},
+    {"linuxloader_debug_skip_outrun_cabinet_check", "GameSpecific", "SKIP_OUTRUN_CABINET_CHECK"},
+    {"linuxloader_debug_id_steering_reduction_percentage", "GameSpecific", "ID_STEERING_REDUCTION_PERCENTAGE"},
+    {"linuxloader_debug_id5_chinese_language", "GameSpecific", "ID5_CHINESE_LANGUAGE"},
+    {"linuxloader_debug_harley_analog_remap", "GameSpecific", "HARLEY_ANALOG_REMAP"},
+    {"linuxloader_debug_mj4_enabled_all_the_time", "GameSpecific", "MJ4_ENABLED_ALL_THE_TIME"},
+    {"linuxloader_debug_rambo_guns_switch", "GameSpecific", "RAMBO_GUNS_SWITCH"},
+    {"linuxloader_debug_primeval_hunt_screen_mode", "GameSpecific", "PRIMEVAL_HUNT_SCREEN_MODE"},
+    {"linuxloader_debug_primeval_hunt_test_screen_single", "GameSpecific", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE"},
+    {"linuxloader_debug_id_cardfile_autoload", "Cards", "ID_CARDFILE_AUTOLOAD"},
+    {"linuxloader_debug_enable_crosshairs", "CrossHairs", "ENABLE_CROSSHAIRS"},
+    {"linuxloader_debug_gsevo_crosshair_always_on", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_ON"},
+    {"linuxloader_debug_gsevo_crosshair_always_off", "CrossHairs", "GSEVO_CROSSHAIR_ALWAYS_OFF"},
+    {"linuxloader_debug_enable_network_patches", "Network", "ENABLE_NETWORK_PATCHES"},
+    {"linuxloader_debug_aburner_motion_off", "Emulation", "ABURNER_MOTION_OFF"},
 };
 static char debug_ini[2048];
 /* RetroArch's rumble, for the drive board's force feedback */
@@ -172,9 +172,9 @@ static void lr_log(enum retro_log_level level, const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     if (log_cb)
-        log_cb(level, "[Lindbergh] %s", buf);
+        log_cb(level, "[linuxloader] %s", buf);
     else
-        fprintf(stderr, "[Lindbergh] %s", buf);
+        fprintf(stderr, "[linuxloader] %s", buf);
 }
 
 static const char *get_option(const char *key, const char *fallback)
@@ -189,24 +189,24 @@ static bool update_option_display(void);
 
 static void read_options(void)
 {
-    test_buttons = strcmp(get_option("lindbergh_test_buttons", "enabled"), "disabled") != 0;
-    audio_thread = strcmp(get_option("lindbergh_audio_thread", "enabled"), "disabled") != 0;
-    gun_stick = strcmp(get_option("lindbergh_gun_aim", "stick"), "mouse") != 0;
-    gun_speed = atoi(get_option("lindbergh_gun_sensitivity", "100")) / 100.0f;
+    test_buttons = strcmp(get_option("linuxloader_test_buttons", "enabled"), "disabled") != 0;
+    audio_thread = strcmp(get_option("linuxloader_audio_thread", "enabled"), "disabled") != 0;
+    gun_stick = strcmp(get_option("linuxloader_gun_aim", "stick"), "mouse") != 0;
+    gun_speed = atoi(get_option("linuxloader_gun_sensitivity", "100")) / 100.0f;
     if (gun_speed < 0.5f || gun_speed > 2.0f)
         gun_speed = 1.0f;
-    crosshair = strcmp(get_option("lindbergh_crosshair", "enabled"), "disabled") != 0;
-    steering_log = !strcmp(get_option("lindbergh_steering", "linear"), "logarithmic");
-    ffb_rumble = strcmp(get_option("lindbergh_ffb_rumble", "enabled"), "disabled") != 0;
-    steering_inner = atoi(get_option("lindbergh_steering_inner", "25")) / 100.0f;
+    crosshair = strcmp(get_option("linuxloader_crosshair", "enabled"), "disabled") != 0;
+    steering_log = !strcmp(get_option("linuxloader_steering", "linear"), "logarithmic");
+    ffb_rumble = strcmp(get_option("linuxloader_ffb_rumble", "enabled"), "disabled") != 0;
+    steering_inner = atoi(get_option("linuxloader_steering_inner", "25")) / 100.0f;
     if (steering_inner < 0.05f || steering_inner > 0.5f)
         steering_inner = 0.25f;
-    steering_power = !strcmp(get_option("lindbergh_steering_effect", "cubic"), "square") ? 2 : 3;
+    steering_power = !strcmp(get_option("linuxloader_steering_effect", "cubic"), "square") ? 2 : 3;
     if (environ_cb)
         update_option_display();
-    snprintf(resolution, sizeof(resolution), "%s", get_option("lindbergh_resolution", "native"));
-    force_widescreen = !strcmp(get_option("lindbergh_force_widescreen", "disabled"), "enabled");
-    start_in_test = !strcmp(get_option("lindbergh_debug_test_mode", "0"), "1");
+    snprintf(resolution, sizeof(resolution), "%s", get_option("linuxloader_resolution", "native"));
+    force_widescreen = !strcmp(get_option("linuxloader_force_widescreen", "disabled"), "enabled");
+    start_in_test = !strcmp(get_option("linuxloader_debug_test_mode", "0"), "1");
     size_t used = 0;
     debug_ini[0] = 0;
     for (size_t i = 0; i < sizeof(debug_settings) / sizeof(debug_settings[0]); i++)
@@ -234,160 +234,160 @@ static struct retro_core_option_v2_category option_categories[] = {
 };
 
 static struct retro_core_option_v2_definition option_definitions[] = {
-    {"lindbergh_resolution", "Resolution (Restart)", NULL,
+    {"linuxloader_resolution", "Resolution (Restart)", NULL,
      "The width and height the games the loader can patch render at. Native keeps the linuxloader.ini's. Every frame goes through system memory to RetroArch, so the highest ones cost speed. Warning: setting this option above your display's resolution will break some games or make them unable to launch.",
      NULL, "video",
      {{"native", "Native"}, {"1280x720", NULL}, {"1920x1080", NULL}, {"2560x1440", NULL}, {"3840x2160", NULL}, {"5120x2880", NULL}, {NULL, NULL}},
      "native"},
-    {"lindbergh_force_widescreen", "Force 16:9 (Restart)", NULL,
+    {"linuxloader_force_widescreen", "Force 16:9 (Restart)", NULL,
      "Makes every game run in widescreen. May break or stretch some games.",
      NULL, "video",
      {{"disabled", "Disabled"}, {"enabled", "Enabled"}, {NULL, NULL}},
      "disabled"},
-    {"lindbergh_test_buttons", "Service and Test Buttons", NULL,
+    {"linuxloader_test_buttons", "Service and Test Buttons", NULL,
      "L3 as the cabinet's Service button and R3 as its Test button, on both pads. Disabled keeps them from being pressed by accident; the keyboard's S and T stay.",
      NULL, "input",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_gun_aim", "Gun Aim", NULL,
+    {"linuxloader_gun_aim", "Gun Aim", NULL,
      "What aims in the gun games, for both players. Analog Stick: each player's left stick (or D-pad) moves the aim, R2 fires, R reloads, L2 is the gun's button, L shakes the gun in The House of the Dead 4. Too Spicy: L2 reloads, L and R are the pedals. Ghost Squad Evolution: L2 is Action, L is Change. Primeval Hunt: L2 pumps. Mouse: RetroArch's light gun on each player's port, which follows the mouse; left button fires, right reloads, middle is the gun's button, aiming off the picture reloads too. Ghost Squad Evolution: right is Action, middle is Change. The House of the Dead 4: right is the gun's button, middle shakes. Too Spicy: middle is the left pedal, right the right one. Primeval Hunt: middle pumps, and the touch screen takes the mouse's clicks.",
      NULL, "input",
      {{"stick", "Analog Stick"}, {"mouse", "Mouse"}, {NULL, NULL}},
      "stick"},
-    {"lindbergh_gun_sensitivity", "Gun Pointer Sensitivity", NULL,
+    {"linuxloader_gun_sensitivity", "Gun Pointer Sensitivity", NULL,
      "How fast the sticks move the aim with Gun Aim on Analog Stick, as fast across as up and down; at 100% a full tilt crosses the picture's height in about a second. The mouse aims where it points.",
      NULL, "input",
      {{"50", "50%"}, {"60", "60%"}, {"70", "70%"}, {"80", "80%"}, {"90", "90%"}, {"100", "100%"}, {"110", "110%"},
       {"120", "120%"}, {"130", "130%"}, {"140", "140%"}, {"150", "150%"}, {"160", "160%"}, {"170", "170%"},
       {"180", "180%"}, {"190", "190%"}, {"200", "200%"}, {NULL, NULL}},
      "100"},
-    {"lindbergh_crosshair", "Crosshair", NULL,
+    {"linuxloader_crosshair", "Crosshair", NULL,
      "The gun games' crosshairs drawn over the picture: blue for player 1, red for player 2, which shows once that player aims.",
      NULL, "input",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_ffb_rumble", "Force Feedback to Rumble", NULL,
+    {"linuxloader_ffb_rumble", "Force Feedback to Rumble", NULL,
      "The drive board's force feedback as rumble on player 1's pad, in the driving games: OutRun 2 SP SDX, Initial D 4 and 5, Hummer. Needs the drive board emulated, which Debug > EMULATE_DRIVEBOARD's Default (per game) does for those games.",
      NULL, "input",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_steering", "Steering Response", NULL,
+    {"linuxloader_steering", "Steering Response", NULL,
      "Linear: the left stick's X as it is. Logarithmic: on a curve with less of the turn around the centre and steeper towards the ends, as the Sega System 32 racers' dip switch has it, so a stick steers less twitchily. Its shape is set by Steering Inner Zone and Steering Effect.",
      NULL, "input",
      {{"linear", "Linear"}, {"logarithmic", "Logarithmic"}, {NULL, NULL}},
      "linear"},
-    {"lindbergh_steering_inner", "Steering Inner Zone", NULL,
+    {"linuxloader_steering_inner", "Steering Inner Zone", NULL,
      "With logarithmic steering: the share of the turn at the centre. Lower is calmer around the centre. OutRun 2 plays well at 20 with Square, Initial D at 50 with Cubic.",
      NULL, "input",
      {{"5", "5%"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {NULL, NULL}},
      "25"},
-    {"lindbergh_steering_effect", "Steering Effect", NULL,
+    {"linuxloader_steering_effect", "Steering Effect", NULL,
      "With logarithmic steering: how the rest of the turn rises towards full lock. Cubic is strong, Square weak.",
      NULL, "input",
      {{"cubic", "Cubic (Strong)"}, {"square", "Square (Weak)"}, {NULL, NULL}},
      "cubic"},
-    {"lindbergh_audio_thread", "Audio Thread (Restart)", NULL,
+    {"linuxloader_audio_thread", "Audio Thread (Restart)", NULL,
      "Hands the sound to RetroArch's audio thread as the loader mixes it, which keeps its pace where a game drops frames. OutRun 2 SP's announcer is lost with it.",
      NULL, "audio",
      {{"enabled", "Enabled"}, {"disabled", "Disabled"}, {NULL, NULL}},
      "enabled"},
-    {"lindbergh_debug_freeplay", "FREEPLAY", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_freeplay", "FREEPLAY", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_test_mode", "TEST_MODE", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_test_mode", "TEST_MODE", NULL, NULL, NULL, "debug",
      {{"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "0"},
-    {"lindbergh_debug_emulate_driveboard", "EMULATE_DRIVEBOARD", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_driveboard", "EMULATE_DRIVEBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_emulate_motionboard", "EMULATE_MOTIONBOARD", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_motionboard", "EMULATE_MOTIONBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_emulate_rideboard", "EMULATE_RIDEBOARD", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_rideboard", "EMULATE_RIDEBOARD", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_emulate_hw210_cardreader", "EMULATE_HW210_CARDREADER", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_hw210_cardreader", "EMULATE_HW210_CARDREADER", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_emulate_id_cardreader", "EMULATE_ID_CARDREADER", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_id_cardreader", "EMULATE_ID_CARDREADER", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_emulate_touchscreen", "EMULATE_TOUCHSCREEN", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_emulate_touchscreen", "EMULATE_TOUCHSCREEN", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_region", "REGION", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_region", "REGION", NULL, NULL, NULL, "debug",
      {{"default", "Default (Export)"}, {"JP", "Japan"}, {"US", "US"}, {"EX", "Export"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_lindbergh_colour", "LINDBERGH_COLOUR", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_lindbergh_colour", "LINDBERGH_COLOUR", NULL, NULL, NULL, "debug",
      {{"default", "Default (per game)"}, {"YELLOW", "Yellow"}, {"RED", "Red"}, {"BLUE", "Blue"}, {"SILVER", "Silver"}, {"REDEX", "RedEX"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_debug_msgs", "DEBUG_MSGS", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_debug_msgs", "DEBUG_MSGS", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_use_alt_jvs_passthrough", "USE_ALT_JVS_PASSTHROUGH", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_use_alt_jvs_passthrough", "USE_ALT_JVS_PASSTHROUGH", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_boost_render_res", "BOOST_RENDER_RES", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_boost_render_res", "BOOST_RENDER_RES", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_hummer_flicker_fix", "HUMMER_FLICKER_FIX", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_hummer_flicker_fix", "HUMMER_FLICKER_FIX", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_lgj_render_with_mesa", "LGJ_RENDER_WITH_MESA", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_lgj_render_with_mesa", "LGJ_RENDER_WITH_MESA", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_disable_builtin_font", "DISABLE_BUILTIN_FONT", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_disable_builtin_font", "DISABLE_BUILTIN_FONT", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_disable_builtin_logos", "DISABLE_BUILTIN_LOGOS", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_disable_builtin_logos", "DISABLE_BUILTIN_LOGOS", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_cpu_freq_ghz", "CPU_FREQ_GHZ", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_cpu_freq_ghz", "CPU_FREQ_GHZ", NULL, NULL, NULL, "debug",
      {{"default", "Default (detected)"}, {"1.0", "1.0 GHz"}, {"1.5", "1.5 GHz"}, {"2.0", "2.0 GHz"}, {"2.5", "2.5 GHz"}, {"3.0", "3.0 GHz"}, {"3.5", "3.5 GHz"}, {"4.0", "4.0 GHz"}, {"4.5", "4.5 GHz"}, {"5.0", "5.0 GHz"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_skip_outrun_cabinet_check", "SKIP_OUTRUN_CABINET_CHECK", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_skip_outrun_cabinet_check", "SKIP_OUTRUN_CABINET_CHECK", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_id_steering_reduction_percentage", "ID_STEERING_REDUCTION_PERCENTAGE", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_id_steering_reduction_percentage", "ID_STEERING_REDUCTION_PERCENTAGE", NULL, NULL, NULL, "debug",
      {{"default", "Default (0%)"}, {"0", "0%"}, {"5", "5%"}, {"10", "10%"}, {"15", "15%"}, {"20", "20%"}, {"25", "25%"}, {"30", "30%"}, {"35", "35%"}, {"40", "40%"}, {"45", "45%"}, {"50", "50%"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_id5_chinese_language", "ID5_CHINESE_LANGUAGE", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_id5_chinese_language", "ID5_CHINESE_LANGUAGE", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_harley_analog_remap", "HARLEY_ANALOG_REMAP", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_harley_analog_remap", "HARLEY_ANALOG_REMAP", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_mj4_enabled_all_the_time", "MJ4_ENABLED_ALL_THE_TIME", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_mj4_enabled_all_the_time", "MJ4_ENABLED_ALL_THE_TIME", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_rambo_guns_switch", "RAMBO_GUNS_SWITCH", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_rambo_guns_switch", "RAMBO_GUNS_SWITCH", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_primeval_hunt_screen_mode", "PRIMEVAL_HUNT_SCREEN_MODE", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_primeval_hunt_screen_mode", "PRIMEVAL_HUNT_SCREEN_MODE", NULL, NULL, NULL, "debug",
      {{"default", "Default (1)"}, {"0", "0"}, {"1", "1"}, {"2", "2"}, {"3", "3"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_primeval_hunt_test_screen_single", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_primeval_hunt_test_screen_single", "PRIMEVAL_HUNT_TEST_SCREEN_SINGLE", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_id_cardfile_autoload", "ID_CARDFILE_AUTOLOAD", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_id_cardfile_autoload", "ID_CARDFILE_AUTOLOAD", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_enable_crosshairs", "ENABLE_CROSSHAIRS", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_enable_crosshairs", "ENABLE_CROSSHAIRS", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_gsevo_crosshair_always_on", "GSEVO_CROSSHAIR_ALWAYS_ON", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_gsevo_crosshair_always_on", "GSEVO_CROSSHAIR_ALWAYS_ON", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_gsevo_crosshair_always_off", "GSEVO_CROSSHAIR_ALWAYS_OFF", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_gsevo_crosshair_always_off", "GSEVO_CROSSHAIR_ALWAYS_OFF", NULL, NULL, NULL, "debug",
      {{"default", "Default (Off)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
-    {"lindbergh_debug_enable_network_patches", "ENABLE_NETWORK_PATCHES", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_enable_network_patches", "ENABLE_NETWORK_PATCHES", NULL, NULL, NULL, "debug",
      {{"default", "Default (On)"}, {"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "default"},
     /* The core's own (eepromSettings.c): After Burner Climax does not start
      * on a Deluxe cabinet with motion on, which it is out of the box, so on
      * by default (NNshi) */
-    {"lindbergh_debug_aburner_motion_off", "ABURNER_MOTION_OFF", NULL, NULL, NULL, "debug",
+    {"linuxloader_debug_aburner_motion_off", "ABURNER_MOTION_OFF", NULL, NULL, NULL, "debug",
      {{"0", "Off"}, {"1", "On"}, {NULL, NULL}},
      "1"},
     {NULL, NULL, NULL, NULL, NULL, NULL, {{NULL, NULL}}, NULL},
@@ -398,11 +398,11 @@ static struct retro_core_option_v2_definition option_definitions[] = {
 static bool update_option_display(void)
 {
     static int shown = -1;
-    const bool log = !strcmp(get_option("lindbergh_steering", "linear"), "logarithmic");
+    const bool log = !strcmp(get_option("linuxloader_steering", "linear"), "logarithmic");
     if (shown == (int)log)
         return false;
     shown = log;
-    static const char *const curve_options[] = {"lindbergh_steering_inner", "lindbergh_steering_effect"};
+    static const char *const curve_options[] = {"linuxloader_steering_inner", "linuxloader_steering_effect"};
     for (unsigned i = 0; i < 2; i++)
     {
         struct retro_core_option_display display = {curve_options[i], log};
@@ -467,13 +467,23 @@ void retro_deinit(void)
     audio_out = NULL;
 }
 
+/* The upstream loader's release this fork is on and the fork's commit, as
+ * "v3.0.13 (libretro core 911049d)" (NNshi) */
+#ifndef LR_LOADER_VERSION
+#define LR_LOADER_VERSION "unknown"
+#endif
+#ifndef LR_COMMIT
+#define LR_COMMIT "unknown"
+#endif
+#define LR_VERSION LR_LOADER_VERSION " (libretro core " LR_COMMIT ")"
+
 unsigned retro_api_version(void) { return RETRO_API_VERSION; }
 
 void retro_get_system_info(struct retro_system_info *info)
 {
     memset(info, 0, sizeof(*info));
-    info->library_name = "Lindbergh";
-    info->library_version = "0.1";
+    info->library_name = "linuxloader";
+    info->library_version = LR_VERSION;
     info->valid_extensions = "elf|lindbergh|exe|/";
     info->need_fullpath = true;
     info->block_extract = true;
@@ -606,7 +616,7 @@ static void close_shm(void)
 static bool create_shm(void)
 {
 #ifdef _WIN32
-    snprintf(shm_name, sizeof(shm_name), "Local\\lindbergh-libretro-%lu", GetCurrentProcessId());
+    snprintf(shm_name, sizeof(shm_name), "Local\\linuxloader-libretro-%lu", GetCurrentProcessId());
     char event_name[96];
     snprintf(event_name, sizeof(event_name), "%s" LR_EVENT_RUN, shm_name);
     run_event = CreateEventA(NULL, FALSE, FALSE, event_name);
@@ -626,7 +636,7 @@ static bool create_shm(void)
         return false;
     }
 #else
-    snprintf(shm_name, sizeof(shm_name), "/lindbergh-libretro-%d", (int)getpid());
+    snprintf(shm_name, sizeof(shm_name), "/linuxloader-libretro-%d", (int)getpid());
     int fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0 || ftruncate(fd, sizeof(LrShm)) != 0)
     {
@@ -801,7 +811,7 @@ static void make_dirs(char *path)
     }
 }
 
-/* The loader this core carries (the build's system/lindbergh, as a zip)
+/* The loader this core carries (the build's system/linuxloader, as a zip)
  * written to root when what is there is from another build or missing, as
  * its build file says: one file to install, the core (NNshi). Without one
  * carried, root holds the loader as it was put there. */
@@ -951,7 +961,7 @@ static bool start_loader(void)
     if (GetFileAttributesA(exe) == INVALID_FILE_ATTRIBUTES)
     {
         lr_log(RETRO_LOG_ERROR, "the loader is not in %s (linuxloader.exe missing)\n", root);
-        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
+        struct retro_message msg = {"linuxloader: the loader is missing from system/linuxloader", 600};
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
         return false;
     }
@@ -959,7 +969,7 @@ static bool start_loader(void)
         return false;
     last_frame = 0;
 
-    /* The loader's console output goes to system/lindbergh/loader.log */
+    /* The loader's console output goes to system/linuxloader/loader.log */
     char log_path[PATH_MAX];
     snprintf(log_path, sizeof(log_path), "%s\\loader.log", root);
     SECURITY_ATTRIBUTES inherit = {sizeof(inherit), NULL, TRUE};
@@ -1019,7 +1029,7 @@ static bool start_loader(void)
     if (access(box64, X_OK) != 0 || access(launcher, R_OK) != 0)
     {
         lr_log(RETRO_LOG_ERROR, "box64 or the loader is not in %s\n", root);
-        struct retro_message msg = {"Lindbergh: box64 or the loader is missing from system/lindbergh", 600};
+        struct retro_message msg = {"linuxloader: box64 or the loader is missing from system/linuxloader", 600};
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
         return false;
     }
@@ -1027,7 +1037,7 @@ static bool start_loader(void)
     if (access(apprun, X_OK) != 0)
     {
         lr_log(RETRO_LOG_ERROR, "the loader is not in %s (AppRun missing)\n", root);
-        struct retro_message msg = {"Lindbergh: the loader is missing from system/lindbergh", 600};
+        struct retro_message msg = {"linuxloader: the loader is missing from system/linuxloader", 600};
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
         return false;
     }
@@ -1088,6 +1098,7 @@ bool retro_load_game(const struct retro_game_info *game)
 {
     if (!game || !game->path)
         return false;
+    lr_log(RETRO_LOG_INFO, "linuxloader %s\n", LR_VERSION);
     read_options();
 
     enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_XRGB8888;
@@ -1110,8 +1121,8 @@ bool retro_load_game(const struct retro_game_info *game)
     if (environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &saves) && saves && *saves)
     {
         /* the saves directory as RetroArch gives it, which with its saves
-         * sorted by core is saves/Lindbergh already (NNshi: one more
-         * Lindbergh made saves/Lindbergh/Lindbergh) */
+         * sorted by core is saves/linuxloader already (NNshi: one more
+         * folder made saves/Lindbergh/Lindbergh) */
 #ifdef _WIN32
         snprintf(s_saves, sizeof(s_saves), "%s\\", saves);
 #else
@@ -1121,10 +1132,10 @@ bool retro_load_game(const struct retro_game_info *game)
         s_saves[strlen(s_saves) - 1] = 0;
     }
     char root[PATH_MAX];
-    snprintf(root, sizeof(root), "%s/lindbergh", system ? system : ".");
+    snprintf(root, sizeof(root), "%s/linuxloader", system ? system : ".");
     if (!install_loader(root))
     {
-        struct retro_message msg = {"Lindbergh: the loader could not be written to system/lindbergh (see the log)", 600};
+        struct retro_message msg = {"linuxloader: the loader could not be written to system/linuxloader (see the log)", 600};
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
         return false;
     }

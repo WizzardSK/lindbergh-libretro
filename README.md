@@ -1,10 +1,10 @@
-# Lindbergh libretro core
+# linuxloader libretro core
 
 A libretro core for Sega Lindbergh games, built on [Linux Loader](https://github.com/lindbergh-loader/linuxloader) (formerly Lindbergh Loader). It runs the games in RetroArch on Linux x86-64, Linux aarch64 and Windows x86-64.
 
 ## Installing
 
-The core is the one file to install: `lindbergh_libretro.so` (Linux) or `lindbergh_libretro.dll` (Windows) goes in RetroArch's `cores/`, its `.info` in `info/`. The core carries the loader and writes it to RetroArch's `system/lindbergh/` at load, when that folder is missing or holds another build's (its `build` file names the build), so the first load after an update takes a moment longer.
+The core is the one file to install: `linuxloader_libretro.so` (Linux) or `linuxloader_libretro.dll` (Windows) goes in RetroArch's `cores/`, its `.info` in `info/`. The core carries the loader and writes it to RetroArch's `system/linuxloader/` at load, when that folder is missing or holds another build's (its `build` file names the build), so the first load after an update takes a moment longer.
 
 ## Content
 
@@ -25,7 +25,7 @@ Some dumps need their folders moved before the game runs; the log does not say s
 - After Burner Climax shows an error on its first start, while its EEPROM is new: close it and start it again (NNshi).
 - Gun games: with Gun Aim on Analog Stick the pad's L, L2, R and R2 (LB, LT, RB, RT) are the gun's buttons; on Mouse the mouse's left, right and middle buttons are, and shooting off the picture reloads. Which button does what per game is under Gun Aim below.
 
-On Windows with an NVIDIA GPU, a program profile in the NVIDIA Control Panel for `system/lindbergh/linuxloader.exe` with Anisotropic Filtering at 16x sharpens the games' textures; forcing MSAA or MFAA there changes nothing (NNshi).
+On Windows with an NVIDIA GPU, a program profile in the NVIDIA Control Panel for `system/linuxloader/linuxloader.exe` with Anisotropic Filtering at 16x sharpens the games' textures; forcing MSAA or MFAA there changes nothing (NNshi).
 
 ## Core options
 
@@ -62,7 +62,7 @@ A `controls.ini` maps them as standalone, since RetroArch's pads reach the game 
 
 ## How it works
 
-The games are 32-bit Linux programs, so the core does not run them itself: it starts the loader as a process of its own and exchanges the frames, the audio and the input with it through shared memory (`src/libretro/`, the loader's side in `src/loader/libretro/libretroBridge.c`). The game draws one frame per RetroArch frame and its window stays hidden. On Linux aarch64 the loader and the game run through box64 (built with BOX32, for 32-bit x86), which comes with the core. On Windows the loader's own Windows build (`linuxloader.exe` and `ll-deps/`) loads the game's ELF; its console output goes to `system/lindbergh/loader.log`.
+The games are 32-bit Linux programs, so the core does not run them itself: it starts the loader as a process of its own and exchanges the frames, the audio and the input with it through shared memory (`src/libretro/`, the loader's side in `src/loader/libretro/libretroBridge.c`). The game draws one frame per RetroArch frame and its window stays hidden. On Linux aarch64 the loader and the game run through box64 (built with BOX32, for 32-bit x86), which comes with the core. On Windows the loader's own Windows build (`linuxloader.exe` and `ll-deps/`) loads the game's ELF; its console output goes to `system/linuxloader/loader.log`.
 
 ## Building
 

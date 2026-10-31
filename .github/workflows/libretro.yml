@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the version the core reports
 
       - name: Cache APT packages
         uses: actions/cache@v4
@@ -49,15 +51,15 @@ jobs:
           make linux
           scripts/appimage/make-appimage.sh
 
-      # The core carries the loader's system/lindbergh as a zip and writes
+      # The core carries the loader's system/linuxloader as a zip and writes
       # it out at load; the archive still has it beside the core too
       - name: System zip
         shell: bash
         run: |
-          mkdir -p dist/system/lindbergh
-          cp -a build-linux/linuxloader.AppDir/. dist/system/lindbergh/
-          git rev-parse --short HEAD > dist/system/lindbergh/build
-          (cd dist/system/lindbergh && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
+          mkdir -p dist/system/linuxloader
+          cp -a build-linux/linuxloader.AppDir/. dist/system/linuxloader/
+          git rev-parse --short HEAD > dist/system/linuxloader/build
+          (cd dist/system/linuxloader && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
 
       - name: Core
         run: CC=gcc make -f Makefile.libretro SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
@@ -66,15 +68,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/cores dist/info
-          cp build/lindbergh_libretro.so dist/cores/
-          strip dist/cores/lindbergh_libretro.so
-          cp lindbergh_libretro.info dist/info/
-          tar -czf lindbergh_libretro-linux-x86_64.tar.gz -C dist .
+          cp build/linuxloader_libretro.so dist/cores/
+          strip dist/cores/linuxloader_libretro.so
+          cp linuxloader_libretro.info dist/info/
+          tar -czf linuxloader_libretro-linux-x86_64.tar.gz -C dist .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lindbergh_libretro-linux-x86_64
-          path: lindbergh_libretro-linux-x86_64.tar.gz
+          name: linuxloader_libretro-linux-x86_64
+          path: linuxloader_libretro-linux-x86_64.tar.gz
 
   # The loader's Windows build (linuxloader.exe, which loads the game's ELF
   # itself), as the project's own Windows release makes it, and the 64-bit
@@ -85,6 +87,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the version the core reports
       # Only what the runner lacks (cmake, make and zip are on it), without
       # the script's apt upgrade of the whole runner, and from Ubuntu's own
       # archive instead of Azure's mirror, which served some 50 KB/s (NNshi).
@@ -101,10 +105,10 @@ jobs:
       - name: System zip
         shell: bash
         run: |
-          mkdir -p dist/system/lindbergh
-          cp -a win-release/. dist/system/lindbergh/
-          git rev-parse --short HEAD > dist/system/lindbergh/build
-          (cd dist/system/lindbergh && zip -q -r -9 "$GITHUB_WORKSPACE/system.zip" .)
+          mkdir -p dist/system/linuxloader
+          cp -a win-release/. dist/system/linuxloader/
+          git rev-parse --short HEAD > dist/system/linuxloader/build
+          (cd dist/system/linuxloader && zip -q -r -9 "$GITHUB_WORKSPACE/system.zip" .)
       - name: Core
         run: make -f Makefile.libretro platform=win64 SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
       - name: Package
@@ -113,12 +117,12 @@ jobs:
           # the core and its info side by side, no folders: the artifact is
           # the one zip, and the core carries the loader (NNshi)
           mkdir -p pkg
-          cp build/lindbergh_libretro.dll pkg/
-          x86_64-w64-mingw32-strip pkg/lindbergh_libretro.dll
-          cp lindbergh_libretro.info pkg/
+          cp build/linuxloader_libretro.dll pkg/
+          x86_64-w64-mingw32-strip pkg/linuxloader_libretro.dll
+          cp linuxloader_libretro.info pkg/
       - uses: actions/upload-artifact@v4
         with:
-          name: lindbergh_libretro-windows-x86_64
+          name: linuxloader_libretro-windows-x86_64
           path: pkg/
 
   # box64 with BOX32, which runs 32-bit x86 programs on 64-bit ARM: the
@@ -155,9 +159,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the version the core reports
       - uses: actions/download-artifact@v4
         with:
-          name: lindbergh_libretro-linux-x86_64
+          name: linuxloader_libretro-linux-x86_64
       - uses: actions/download-artifact@v4
         with:
           name: box64-box32
@@ -166,24 +172,24 @@ jobs:
         shell: bash
         run: |
           # the x86 loader's AppDir, with box64 beside it
-          mkdir x86 && tar -xzf lindbergh_libretro-linux-x86_64.tar.gz -C x86
+          mkdir x86 && tar -xzf linuxloader_libretro-linux-x86_64.tar.gz -C x86
           mkdir -p dist
           cp -a x86/system dist/
-          install -m 755 box64-out/box64 dist/system/lindbergh/box64
-          cp box64-out/box64.version dist/system/lindbergh/
-          git rev-parse --short HEAD > dist/system/lindbergh/build
-          (cd dist/system/lindbergh && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
+          install -m 755 box64-out/box64 dist/system/linuxloader/box64
+          cp box64-out/box64.version dist/system/linuxloader/
+          git rev-parse --short HEAD > dist/system/linuxloader/build
+          (cd dist/system/linuxloader && zip -q -r -y -9 "$GITHUB_WORKSPACE/system.zip" .)
       - name: Core
         run: CC=gcc make -f Makefile.libretro SYSTEM_ZIP=system.zip BUILD_STAMP=$(git rev-parse --short HEAD)
       - name: Package
         shell: bash
         run: |
           mkdir -p dist/cores dist/info
-          cp build/lindbergh_libretro.so dist/cores/
-          strip dist/cores/lindbergh_libretro.so
-          cp lindbergh_libretro.info dist/info/
-          tar -czf lindbergh_libretro-linux-aarch64.tar.gz -C dist .
+          cp build/linuxloader_libretro.so dist/cores/
+          strip dist/cores/linuxloader_libretro.so
+          cp linuxloader_libretro.info dist/info/
+          tar -czf linuxloader_libretro-linux-aarch64.tar.gz -C dist .
       - uses: actions/upload-artifact@v4
         with:
-          name: lindbergh_libretro-linux-aarch64
-          path: lindbergh_libretro-linux-aarch64.tar.gz
+          name: linuxloader_libretro-linux-aarch64
+          path: linuxloader_libretro-linux-aarch64.tar.gz

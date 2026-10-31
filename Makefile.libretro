@@ -9,16 +9,21 @@ CFLAGS += -fPIC -Wall -Wextra -Wno-unused-parameter -std=gnu11
 
 ifeq ($(platform),win64)
 CC = x86_64-w64-mingw32-gcc
-TARGET = build/lindbergh_libretro.dll
+TARGET = build/linuxloader_libretro.dll
 LDFLAGS += -shared -static-libgcc -Wl,--no-undefined
 LIBS =
 else
-TARGET = build/lindbergh_libretro.so
+TARGET = build/linuxloader_libretro.so
 LDFLAGS += -shared -Wl,--no-undefined -Wl,--version-script=src/libretro/link.T
 LIBS = -lrt
 endif
 
-SOURCES = src/libretro/lindbergh_libretro.c
+SOURCES = src/libretro/linuxloader_libretro.c
+# The version the core reports: the upstream loader's latest release tag
+# (the checkout needs the tags) and this repository's commit
+LOADER_VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+CFLAGS += -DLR_LOADER_VERSION='"$(LOADER_VERSION)"' -DLR_COMMIT='"$(COMMIT)"'
 ifneq ($(SYSTEM_ZIP),)
 SOURCES += src/libretro/miniz/miniz.c src/libretro/embed.S
 CFLAGS += -DLR_EMBEDDED_SYSTEM -DLR_BUILD_STAMP='"$(BUILD_STAMP)"' -DLR_SYSTEM_ZIP='"$(abspath $(SYSTEM_ZIP))"'

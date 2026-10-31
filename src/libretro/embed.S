@@ -1,5 +1,5 @@
-/* The loader's system/lindbergh as a zip, carried in the core
- * (lindbergh_libretro.c, install_loader); LR_SYSTEM_ZIP is its path */
+/* The loader's system/linuxloader as a zip, carried in the core
+ * (linuxloader_libretro.c, install_loader); LR_SYSTEM_ZIP is its path */
 #if defined(_WIN32)
     .section .rdata,"dr"
 #else
